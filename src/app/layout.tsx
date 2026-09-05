@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description: 'Professional esports broadcast control system for Kabuto Esports.',
 }
 
-export default function RootLayout({ children }: LayoutProps<'/'>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="h-full">
       <head>

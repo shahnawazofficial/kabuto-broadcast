@@ -173,3 +173,174 @@ export async function resetScores(matchId: string): Promise<ActionResult> {
     return { success: false, error: msg }
   }
 }
+
+// ─── Fetch live data for the OBS overlay ─────────────────────────────────────
+
+export interface OverlayScoreEntry {
+  teamId: string
+  teamName: string
+  teamTag: string
+  logoUrl: string | null
+  kills: number
+  placement: number | null
+  totalPoints: number
+  rank: number
+}
+
+export interface OverlayData {
+  match: MatchRow
+  scores: OverlayScoreEntry[]
+}
+
+const DEMO_OVERLAY_TEAMS: TeamRow[] = [
+  { id: 'demo-1', name: 'Soul Esports',     tag: 'SOUL',  logo_url: null, created_at: '', updated_at: '' },
+  { id: 'demo-2', name: 'Team XSpark',      tag: 'TX',    logo_url: null, created_at: '', updated_at: '' },
+  { id: 'demo-3', name: 'GodLike Esports',  tag: 'GODL',  logo_url: null, created_at: '', updated_at: '' },
+  { id: 'demo-4', name: 'Global Esports',   tag: 'GE',    logo_url: null, created_at: '', updated_at: '' },
+  { id: 'demo-5', name: 'OR Esports',       tag: 'OR',    logo_url: null, created_at: '', updated_at: '' },
+  { id: 'demo-6', name: 'Skylightz Gaming', tag: 'SKYLZ', logo_url: null, created_at: '', updated_at: '' },
+  { id: 'demo-7', name: '7Sea Esports',     tag: '7SEA',  logo_url: null, created_at: '', updated_at: '' },
+  { id: 'demo-8', name: 'Enigma Gaming',    tag: 'EG',    logo_url: null, created_at: '', updated_at: '' },
+]
+
+const DEMO_OVERLAY_MATCH: MatchRow = {
+  id: 'demo-match-1',
+  round: 1,
+  group_number: 1,
+  map: 'Erangel',
+  match_number: 1,
+  status: 'live',
+  created_at: '',
+  updated_at: '',
+}
+
+export async function getLiveOverlayData(requestedMatchId?: string): Promise<ActionResult<OverlayData>> {
+  try {
+    const supabase = await createClient()
+
+    // 1. Determine target match
+    let targetMatch: MatchRow | null = null
+
+    if (requestedMatchId) {
+      const { data } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('id', requestedMatchId)
+        .maybeSingle()
+      targetMatch = data
+    }
+
+    if (!targetMatch) {
+      // Check broadcast_state singleton
+      const { data: bState } = await supabase
+        .from('broadcast_state')
+        .select('current_match_id')
+        .maybeSingle()
+
+      if (bState?.current_match_id) {
+        const { data } = await supabase
+          .from('matches')
+          .select('*')
+          .eq('id', bState.current_match_id)
+          .maybeSingle()
+        targetMatch = data
+      }
+    }
+
+    if (!targetMatch) {
+      // Find match with status = 'live' or first match
+      const { data: matches } = await supabase
+        .from('matches')
+        .select('*')
+        .order('match_number', { ascending: true })
+
+      if (matches && matches.length > 0) {
+        targetMatch = matches.find((m) => m.status === 'live') ?? matches[0]
+      }
+    }
+
+    // If still no match in DB, fallback to demo match
+    const match = targetMatch ?? DEMO_OVERLAY_MATCH
+
+    // 2. Fetch teams
+    const { data: dbTeams } = await supabase
+      .from('teams')
+      .select('*')
+      .order('name', { ascending: true })
+
+    const teams = (dbTeams && dbTeams.length > 0) ? dbTeams : DEMO_OVERLAY_TEAMS
+
+    // 3. Fetch scores for this match
+    const { data: dbScores } = await supabase
+      .from('live_scores')
+      .select('*')
+      .eq('match_id', match.id)
+
+    const scoresMap = new Map<string, LiveScoreRow>()
+    if (dbScores) {
+      dbScores.forEach((s) => scoresMap.set(s.team_id, s))
+    }
+
+    // 4. Combine and sort
+    const entries: OverlayScoreEntry[] = teams.map((team) => {
+      const score = scoresMap.get(team.id)
+      const kills = score ? score.kills : 0
+      const placement = score?.position ?? null
+      const totalPoints = score ? score.points : 0
+
+      return {
+        teamId: team.id,
+        teamName: team.name,
+        teamTag: team.tag,
+        logoUrl: team.logo_url,
+        kills,
+        placement,
+        totalPoints,
+        rank: 0, // assigned after sorting
+      }
+    })
+
+    // Sort: Total Points (descending), then Kills (descending), then Team Name
+    entries.sort((a, b) => {
+      if (b.totalPoints !== a.totalPoints) {
+        return b.totalPoints - a.totalPoints
+      }
+      if (b.kills !== a.kills) {
+        return b.kills - a.kills
+      }
+      return a.teamName.localeCompare(b.teamName)
+    })
+
+    // Assign 1-indexed ranks
+    entries.forEach((e, idx) => {
+      e.rank = idx + 1
+    })
+
+    return {
+      success: true,
+      data: {
+        match,
+        scores: entries,
+      },
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to fetch overlay data.'
+    return {
+      success: false,
+      error: msg,
+      data: {
+        match: DEMO_OVERLAY_MATCH,
+        scores: DEMO_OVERLAY_TEAMS.map((t, idx) => ({
+          teamId: t.id,
+          teamName: t.name,
+          teamTag: t.tag,
+          logoUrl: t.logo_url,
+          kills: 0,
+          placement: null,
+          totalPoints: 0,
+          rank: idx + 1,
+        })),
+      },
+    }
+  }
+}
