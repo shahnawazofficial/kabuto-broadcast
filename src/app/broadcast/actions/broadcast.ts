@@ -16,6 +16,13 @@ export interface PlayerOverlayData {
   team: TeamRow | null
 }
 
+export interface EliminationOverlayData {
+  showElimination: boolean
+  team: TeamRow | null
+  kills: number
+  eliminatedAt: number
+}
+
 const FALLBACK_TEAMS_DATA: TeamRow[] = [
   { id: 'team-godl',  name: 'GodLike Esports',  tag: 'GODL',  logo_url: null, created_at: '', updated_at: '' },
   { id: 'team-soul',  name: 'Soul Esports',     tag: 'SOUL',  logo_url: null, created_at: '', updated_at: '' },
@@ -43,6 +50,10 @@ declare global {
     selected_team_id: string | null
     selected_player_id: string | null
     show_player: boolean
+    show_elimination: boolean
+    elimination_team_id: string | null
+    elimination_kills: number
+    eliminated_at: number | null
   } | undefined
 }
 
@@ -52,6 +63,10 @@ function getLocalBroadcastState() {
       selected_team_id: 'team-godl',
       selected_player_id: 'p-jonathan',
       show_player: false,
+      show_elimination: false,
+      elimination_team_id: 'team-godl',
+      elimination_kills: 0,
+      eliminated_at: null,
     }
   }
   return globalThis.__kabutoBroadcastState
@@ -75,6 +90,9 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
       local.selected_team_id = data.selected_team_id
       local.selected_player_id = data.selected_player_id
       local.show_player = data.show_player
+      local.show_elimination = data.show_elimination
+      local.elimination_team_id = data.elimination_team_id
+      local.elimination_kills = data.elimination_kills
       return { success: true, data }
     }
 
@@ -86,9 +104,10 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
         show_player: local.show_player,
         selected_team_id: local.selected_team_id,
         selected_player_id: local.selected_player_id,
-        show_elimination: false,
+        show_elimination: local.show_elimination,
         show_match: false,
-        elimination_kills: 0,
+        elimination_team_id: local.elimination_team_id,
+        elimination_kills: local.elimination_kills,
       })
       .select()
       .maybeSingle()
@@ -110,10 +129,10 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
       selected_team_id: local.selected_team_id,
       show_points: false,
       show_player: local.show_player,
-      show_elimination: false,
+      show_elimination: local.show_elimination,
       show_match: false,
-      elimination_team_id: null,
-      elimination_kills: 0,
+      elimination_team_id: local.elimination_team_id,
+      elimination_kills: local.elimination_kills,
       updated_at: new Date().toISOString(),
     },
   }
@@ -287,3 +306,157 @@ export async function getLivePlayerOverlayData(): Promise<ActionResult<PlayerOve
     },
   }
 }
+
+// ─── Elimination Graphic Server Actions ──────────────────────────────────────
+
+export async function triggerTeamEliminated(
+  teamId: string,
+  kills: number
+): Promise<ActionResult> {
+  const local = getLocalBroadcastState()
+  local.show_elimination = true
+  local.elimination_team_id = teamId
+  local.elimination_kills = kills
+  local.eliminated_at = Date.now()
+
+  try {
+    const supabase = await createClient()
+
+    const { data: existing } = await supabase
+      .from('broadcast_state')
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+
+    const updatePayload = {
+      show_elimination: true,
+      elimination_team_id: teamId,
+      elimination_kills: kills,
+      updated_at: new Date().toISOString(),
+    }
+
+    if (existing) {
+      await supabase
+        .from('broadcast_state')
+        .update(updatePayload)
+        .eq('id', existing.id)
+    } else {
+      await supabase
+        .from('broadcast_state')
+        .insert({
+          ...updatePayload,
+          show_points: false,
+          show_player: false,
+          show_match: false,
+          selected_team_id: teamId,
+          selected_player_id: null,
+        })
+    }
+  } catch {
+    // Supabase optional in local dev
+  }
+
+  revalidatePath('/broadcast')
+  revalidatePath('/overlay/elimination')
+  return { success: true }
+}
+
+export async function hideTeamEliminated(): Promise<ActionResult> {
+  const local = getLocalBroadcastState()
+  local.show_elimination = false
+  local.eliminated_at = null
+
+  try {
+    const supabase = await createClient()
+
+    const { data: existing } = await supabase
+      .from('broadcast_state')
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+
+    if (existing) {
+      await supabase
+        .from('broadcast_state')
+        .update({
+          show_elimination: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+    }
+  } catch {
+    // Supabase optional in local dev
+  }
+
+  revalidatePath('/broadcast')
+  revalidatePath('/overlay/elimination')
+  return { success: true }
+}
+
+export async function getLiveEliminationOverlayData(): Promise<ActionResult<EliminationOverlayData>> {
+  const local = getLocalBroadcastState()
+  let showElimination = local.show_elimination
+  let eliminationTeamId = local.elimination_team_id
+  let eliminationKills = local.elimination_kills
+  let eliminatedAt = local.eliminated_at || 0
+
+  let dbTeam: TeamRow | null = null
+
+  try {
+    const supabase = await createClient()
+
+    const { data: state } = await supabase
+      .from('broadcast_state')
+      .select('*')
+      .limit(1)
+      .maybeSingle()
+
+    if (state) {
+      showElimination = state.show_elimination
+      eliminationTeamId = state.elimination_team_id
+      eliminationKills = state.elimination_kills ?? 0
+      if (state.updated_at) {
+        eliminatedAt = new Date(state.updated_at).getTime()
+      }
+
+      if (eliminationTeamId) {
+        const { data: t } = await supabase
+          .from('teams')
+          .select('*')
+          .eq('id', eliminationTeamId)
+          .maybeSingle()
+        dbTeam = t
+      }
+    }
+  } catch {
+    // Supabase offline fallback
+  }
+
+  if (!showElimination || !eliminationTeamId) {
+    return {
+      success: true,
+      data: {
+        showElimination: false,
+        team: null,
+        kills: 0,
+        eliminatedAt: 0,
+      },
+    }
+  }
+
+  const resolvedTeam =
+    dbTeam ??
+    FALLBACK_TEAMS_DATA.find((t) => t.id === eliminationTeamId) ??
+    FALLBACK_TEAMS_DATA[0]
+
+  return {
+    success: true,
+    data: {
+      showElimination: true,
+      team: resolvedTeam,
+      kills: eliminationKills,
+      eliminatedAt: eliminatedAt || Date.now(),
+    },
+  }
+}
+
