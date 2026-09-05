@@ -1680,10 +1680,6 @@ body:has(.obs-overlay-viewport) {
 .obs-canvas {
   width: 1920px;
   height: 1080px;
-  min-width: 1920px;
-  min-height: 1080px;
-  max-width: 1920px;
-  max-height: 1080px;
   position: relative;
   background: transparent;
   overflow: hidden;
@@ -1691,8 +1687,12 @@ body:has(.obs-overlay-viewport) {
   align-items: center;
   justify-content: center;
   padding: 40px 60px;
-  transform: scale(min(1, calc(100vw / 1920), calc(100vh / 1080)));
-  transform-origin: center center;
+}
+
+@media (max-width: 1919px), (max-height: 1079px) {
+  .obs-canvas {
+    zoom: min(calc(100vw / 1920), calc(100vh / 1080));
+  }
 }
 
 /* Card Container */
@@ -2150,3 +2150,304 @@ body:has(.obs-overlay-viewport) {
   letter-spacing: 0.1em;
   color: #94a3b8;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   STEP 7: OBS BROWSER SOURCE PLAYER GRAPHIC (/overlay/player)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Empty transparent canvas state */
+.obs-canvas--empty {
+  pointer-events: none;
+  background: transparent !important;
+}
+
+/* Player Lower-Third Esports Card */
+.obs-player-card {
+  position: absolute;
+  bottom: 140px;
+  left: 90px;
+  width: 700px;
+  min-height: 180px;
+  background: linear-gradient(135deg, rgba(8, 14, 28, 0.96) 0%, rgba(5, 8, 18, 0.98) 100%);
+  border: 1.5px solid rgba(245, 158, 11, 0.5);
+  border-radius: 14px;
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.85),
+    0 0 35px rgba(245, 158, 11, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  animation: playerOverlayEntrance 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes playerOverlayEntrance {
+  from {
+    opacity: 0;
+    transform: translateX(-48px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* Photo box on left */
+.obs-player-photo-box {
+  width: 175px;
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.15) 0%, rgba(0, 240, 255, 0.08) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.obs-player-photo-img {
+  width: 135px;
+  height: 135px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1.5px solid rgba(245, 158, 11, 0.5);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.obs-player-photo-placeholder {
+  width: 120px;
+  height: 120px;
+  border-radius: 10px;
+  background: rgba(0, 240, 255, 0.1);
+  border: 1.5px solid rgba(0, 240, 255, 0.4);
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.obs-photo-letter {
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 800;
+  color: #00f0ff;
+  text-shadow: 0 0 16px rgba(0, 240, 255, 0.6);
+}
+
+.obs-player-photo-glow {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #f59e0b, #00f0ff);
+}
+
+/* Right Details */
+.obs-player-details {
+  flex: 1;
+  padding: 16px 22px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.obs-player-top-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+}
+
+.obs-player-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.obs-brand-icon {
+  font-size: 13px;
+  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.6));
+}
+
+.obs-brand-text {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #f59e0b;
+  text-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+}
+
+.obs-player-event-tag {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.obs-player-name-block {
+  margin: 6px 0;
+}
+
+.obs-ign-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.obs-player-ign {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #ffffff;
+  text-shadow: 0 0 16px rgba(255, 255, 255, 0.25);
+  margin: 0;
+  line-height: 1.05;
+}
+
+.obs-player-team-tag-pill {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  color: #fbbf24;
+}
+
+.obs-player-realname {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.obs-player-team-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.obs-player-team-logo {
+  border-radius: 4px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.obs-player-team-fallback-logo {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: #00f0ff;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.obs-player-team-name {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.obs-player-role-badge {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #00f0ff;
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+/* Decorative corner accents */
+.obs-corner-accent {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: #f59e0b;
+  pointer-events: none;
+}
+
+.obs-corner-accent--tl {
+  top: 0;
+  left: 0;
+  border-top: 2px solid #f59e0b;
+  border-left: 2px solid #f59e0b;
+  border-top-left-radius: 12px;
+}
+
+.obs-corner-accent--br {
+  bottom: 0;
+  right: 0;
+  border-bottom: 2px solid #f59e0b;
+  border-right: 2px solid #f59e0b;
+  border-bottom-right-radius: 12px;
+}
+
+/* Control Panel Player Graphic Section additions */
+.player-graphic-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.btn--accent-glow {
+  background: var(--clr-accent);
+  color: #000;
+  font-weight: 700;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.4);
+}
+
+.btn--accent-glow:hover:not(:disabled) {
+  background: #fbbf24;
+  box-shadow: 0 0 22px rgba(245, 158, 11, 0.6);
+}
+
+.preview-player-ign-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-avatar-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid var(--clr-accent);
+}
+
+.preview-team-logo {
+  border-radius: 4px;
+  object-fit: cover;
+  border: 1px solid var(--clr-border);
+  margin-left: auto;
+}
+
+.status-pill--active {
+  background: rgba(16, 185, 129, 0.15) !important;
+  border-color: rgba(16, 185, 129, 0.5) !important;
+  color: #10b981 !important;
+}
+
+.status-pill--inactive {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: var(--clr-border) !important;
+  color: var(--clr-text-3) !important;
+}
+
