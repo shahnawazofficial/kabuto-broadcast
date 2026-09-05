@@ -1,11 +1,11 @@
 import type { Metadata } from 'next'
-import BroadcastDashboard from '@/components/broadcast/BroadcastDashboard'
+import BroadcastShell from '@/components/broadcast/BroadcastShell'
 
 export const metadata: Metadata = {
   title: 'Broadcast Control | Kabuto Esports',
-  description: 'Kabuto Esports live broadcast control panel — manage overlays, match info, and player graphics.',
+  description: 'Kabuto Esports live broadcast control panel — manage overlays, match info, teams, and players.',
 }
 
 export default function BroadcastPage() {
-  return <BroadcastDashboard />
+  return <BroadcastShell />
 }
