@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import type { BroadcastStateRow, PlayerRow, TeamRow } from '@/types/database'
+import type { BroadcastStateRow, PlayerRow, TeamRow, MatchRow } from '@/types/database'
 
 export interface ActionResult<T = unknown> {
   success: boolean
@@ -45,7 +45,6 @@ const FALLBACK_PLAYERS_DATA: PlayerRow[] = [
 // ─── Local state cache (ensures instant real-time sync across routes) ────────
 
 declare global {
-  // eslint-disable-next-line no-var
   var __kabutoBroadcastState: {
     selected_team_id: string | null
     selected_player_id: string | null
@@ -55,6 +54,7 @@ declare global {
     elimination_kills: number
     eliminated_at: number | null
     show_points: boolean
+    show_match: boolean
     current_match_id: string | null
   } | undefined
 }
@@ -70,6 +70,7 @@ function getLocalBroadcastState() {
       elimination_kills: 0,
       eliminated_at: null,
       show_points: true,
+      show_match: false,
       current_match_id: 'match-1',
     }
   }
@@ -98,6 +99,7 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
       local.elimination_team_id = data.elimination_team_id
       local.elimination_kills = data.elimination_kills
       if (typeof data.show_points === 'boolean') local.show_points = data.show_points
+      if (typeof data.show_match === 'boolean') local.show_match = data.show_match
       if (data.current_match_id) local.current_match_id = data.current_match_id
       return { success: true, data }
     }
@@ -111,7 +113,7 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
         selected_team_id: local.selected_team_id,
         selected_player_id: local.selected_player_id,
         show_elimination: local.show_elimination,
-        show_match: false,
+        show_match: local.show_match,
         elimination_team_id: local.elimination_team_id,
         elimination_kills: local.elimination_kills,
         current_match_id: local.current_match_id,
@@ -137,7 +139,7 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
       show_points: local.show_points,
       show_player: local.show_player,
       show_elimination: local.show_elimination,
-      show_match: false,
+      show_match: local.show_match,
       elimination_team_id: local.elimination_team_id,
       elimination_kills: local.elimination_kills,
       updated_at: new Date().toISOString(),
@@ -546,7 +548,110 @@ export async function toggleBroadcastOverlay(
   revalidatePath('/overlay/points')
   revalidatePath('/overlay/player')
   revalidatePath('/overlay/elimination')
+  revalidatePath('/overlay/match')
   return { success: true }
 }
+
+// ─── Match Graphic Server Actions ───────────────────────────────────────────
+
+export interface MatchOverlayData {
+  showMatch: boolean
+  match: MatchRow
+}
+
+const FALLBACK_MATCH_DATA: MatchRow = {
+  id: 'match-1',
+  round: 1,
+  group_number: 1,
+  map: 'Erangel',
+  match_number: 1,
+  status: 'live',
+  created_at: '',
+  updated_at: '',
+}
+
+export async function setMatchGraphicState(showMatch: boolean): Promise<ActionResult> {
+  const local = getLocalBroadcastState()
+  local.show_match = showMatch
+
+  try {
+    const supabase = await createClient()
+    const { data: existing } = await supabase
+      .from('broadcast_state')
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+
+    if (existing) {
+      await supabase
+        .from('broadcast_state')
+        .update({
+          show_match: showMatch,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+    }
+  } catch {
+    // Supabase optional in local dev
+  }
+
+  revalidatePath('/broadcast')
+  revalidatePath('/overlay/match')
+  return { success: true }
+}
+
+export async function getLiveMatchOverlayData(): Promise<ActionResult<MatchOverlayData>> {
+  const local = getLocalBroadcastState()
+  let showMatch = local.show_match
+  let currentMatchId = local.current_match_id
+
+  let dbMatch: MatchRow | null = null
+
+  try {
+    const supabase = await createClient()
+    const { data: state } = await supabase
+      .from('broadcast_state')
+      .select('show_match, current_match_id')
+      .limit(1)
+      .maybeSingle()
+
+    if (state) {
+      showMatch = state.show_match
+      if (state.current_match_id) currentMatchId = state.current_match_id
+    }
+
+    if (currentMatchId) {
+      const { data: m } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('id', currentMatchId)
+        .maybeSingle()
+      dbMatch = m
+    }
+
+    if (!dbMatch) {
+      const { data: matches } = await supabase
+        .from('matches')
+        .select('*')
+        .order('match_number', { ascending: true })
+      if (matches && matches.length > 0) {
+        dbMatch = matches.find((m) => m.status === 'live') ?? matches[0]
+      }
+    }
+  } catch {
+    // Supabase optional in local dev
+  }
+
+  const resolvedMatch = dbMatch ?? FALLBACK_MATCH_DATA
+
+  return {
+    success: true,
+    data: {
+      showMatch,
+      match: resolvedMatch,
+    },
+  }
+}
+
 
 

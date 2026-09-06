@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useTransition } from 'react'
 import Image from 'next/image'
-import type { MatchRow, TeamRow, LiveScoreRow, MatchStatus } from '@/types/database'
+import type { MatchRow, TeamRow, LiveScoreRow } from '@/types/database'
 import {
   getMatches,
   getMatchScores,
@@ -183,7 +183,7 @@ export default function LivePointsTableSection({ className = '' }: Props) {
       const current = prev[teamId]
       if (!current) return prev
 
-      let updated = { ...current }
+      const updated = { ...current }
 
       if (field === 'kills') {
         const val = rawVal === '' ? 0 : Math.max(0, parseInt(rawVal, 10) || 0)

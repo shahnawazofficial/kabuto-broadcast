@@ -30,7 +30,6 @@ const DEFAULT_SEED_MATCHES = [
 ]
 
 declare global {
-  // eslint-disable-next-line no-var
   var __kabutoScores: Map<string, LiveScoreRow[]> | undefined
 }
 
@@ -150,7 +149,13 @@ export async function saveScores(
   try {
     const supabase = await createClient()
 
-    const dbRows = upsertRows.map(({ id: _id, ...row }) => row)
+    const dbRows = upsertRows.map((row) => ({
+      match_id: row.match_id,
+      team_id: row.team_id,
+      kills: row.kills,
+      points: row.points,
+      position: row.position,
+    }))
     await supabase
       .from('live_scores')
       .upsert(dbRows, { onConflict: 'match_id,team_id' })

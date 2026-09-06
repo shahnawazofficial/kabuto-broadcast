@@ -199,7 +199,13 @@ body {
 }
 
 .dashboard-row--bottom {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1200px) {
+  .dashboard-row--bottom {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ═══ PANEL CARD ════════════════════════════════════════ */
@@ -1993,12 +1999,14 @@ body:has(.obs-overlay-viewport) {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .obs-team-logo {
   border-radius: 6px;
   object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
 }
 
 .obs-team-tag-badge {
@@ -2024,6 +2032,9 @@ body:has(.obs-overlay-viewport) {
   font-weight: 700;
   color: #ffffff;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 210px;
 }
 
 .obs-team-tag-pill {
@@ -2705,5 +2716,223 @@ body:has(.obs-overlay-viewport) {
   letter-spacing: 0.12em;
   color: #94a3b8;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   STEP 10: OBS BROWSER SOURCE MATCH GRAPHIC (/overlay/match)
+   ═══════════════════════════════════════════════════════════════ */
+
+.obs-overlay-viewport {
+  width: 1920px;
+  height: 1080px;
+  background: transparent !important;
+  overflow: hidden !important;
+  position: relative;
+  margin: 0;
+  padding: 0;
+}
+
+body:has(.obs-overlay-viewport),
+html:has(.obs-overlay-viewport),
+body:has(.obs-canvas),
+html:has(.obs-canvas) {
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.obs-match-graphic-card {
+  position: absolute;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 900px;
+  background: linear-gradient(135deg, rgba(8, 14, 28, 0.97) 0%, rgba(5, 8, 18, 0.99) 100%);
+  border: 1.5px solid rgba(245, 158, 11, 0.55);
+  border-radius: 14px;
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.92),
+    0 0 45px rgba(245, 158, 11, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: matchIntroEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes matchIntroEntrance {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(35px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+.obs-match-laser {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent 0%, #f59e0b 30%, #00f0ff 50%, #f59e0b 70%, transparent 100%);
+  box-shadow: 0 0 12px #f59e0b;
+}
+
+.obs-match-header {
+  background: rgba(4, 7, 14, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.obs-match-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.obs-match-crest-icon {
+  font-size: 16px;
+}
+
+.obs-match-brand-name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  color: #f59e0b;
+  text-shadow: 0 0 12px rgba(245, 158, 11, 0.5);
+}
+
+.obs-match-header-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.obs-match-tournament-name {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #cbd5e1;
+}
+
+.obs-match-sub-bar {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.12) 0%, rgba(0, 240, 255, 0.08) 50%, rgba(245, 158, 11, 0.12) 100%);
+  padding: 6px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.obs-match-status-badge {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.25em;
+  color: #00f0ff;
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+}
+
+.obs-match-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 18px 24px;
+  background: radial-gradient(circle at center, rgba(245, 158, 11, 0.04) 0%, transparent 70%);
+}
+
+.obs-match-box {
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.obs-match-box--highlight {
+  border-color: rgba(0, 240, 255, 0.45);
+  background: rgba(0, 240, 255, 0.05);
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.12);
+}
+
+.obs-match-box--primary {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.06);
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.12);
+}
+
+.obs-match-box-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.obs-match-box-value {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.obs-match-map-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.obs-match-map-icon {
+  font-size: 18px;
+}
+
+.obs-match-footer {
+  background: rgba(4, 7, 14, 0.85);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.obs-match-footer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.obs-match-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
 
 

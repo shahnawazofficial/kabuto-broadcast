@@ -8,6 +8,7 @@ import PlayerGraphicSection from '@/components/broadcast/PlayerGraphicSection'
 import TeamEliminationSection from '@/components/broadcast/TeamEliminationSection'
 import OverlayStatusSection from '@/components/broadcast/OverlayStatusSection'
 import LivePointsTableSection from '@/components/broadcast/LivePointsTableSection'
+import MatchGraphicSection from '@/components/broadcast/MatchGraphicSection'
 
 import { toggleBroadcastOverlay } from '@/app/broadcast/actions/broadcast'
 import { notifyRealtimeChange } from '@/lib/supabase/realtime'
@@ -75,10 +76,11 @@ export default function BroadcastDashboard({ embedded = false }: Props) {
         <LivePointsTableSection />
       </div>
 
-      {/* Bottom row: Player Graphic + Team Elimination */}
+      {/* Bottom row: Player Graphic + Team Elimination + Match Graphic */}
       <div className="dashboard-row dashboard-row--bottom">
         <PlayerGraphicSection onActivate={activateOverlay} />
         <TeamEliminationSection onActivate={activateOverlay} />
+        <MatchGraphicSection onActivate={activateOverlay} />
       </div>
     </>
   )

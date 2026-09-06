@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useTransition } from 'react'
 import Image from 'next/image'
 import type { TeamRow, PlayerRow } from '@/types/database'
-import { createClient } from '@/lib/supabase/client'
 import {
   getBroadcastState,
   setPlayerGraphicState,
