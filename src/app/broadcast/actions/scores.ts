@@ -245,8 +245,9 @@ export async function getMatchScores(matchId: string): Promise<ActionResult<Matc
 
       matchTeams = decoratedTeams.filter((t: TeamRow) => {
         if (scoredTeamIds.has(t.id)) return true
-        const tRound = t.round ?? 1
-        const tGroup = t.group_number ?? 1
+        const raw = t as unknown as Record<string, unknown>
+        const tRound = typeof raw['round'] === 'number' ? raw['round'] : 1
+        const tGroup = typeof raw['group_number'] === 'number' ? raw['group_number'] : 1
         return tRound === match.round && tGroup === match.group_number
       })
 
@@ -537,8 +538,9 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
     // Filter to teams for this match
     const matchTeams: TeamRow[] = allTeams.filter((t: TeamRow) => {
       if (scoresMap.has(t.id)) return true
-      const tRound = t.round ?? 1
-      const tGroup = t.group_number ?? 1
+      const raw = t as unknown as Record<string, unknown>
+      const tRound = typeof raw['round'] === 'number' ? raw['round'] : 1
+      const tGroup = typeof raw['group_number'] === 'number' ? raw['group_number'] : 1
       return tRound === match.round && tGroup === match.group_number
     })
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Shared teams query helper used by scores.ts.
  * Kept in a separate file to break the circular dependency:
  *   scores.ts -> teams.ts -> scores.ts (getOrCreateMatch)
@@ -56,12 +56,16 @@ export async function fetchTeamsWithRoundGroup(): Promise<TeamRow[]> {
     const inMemoryMap = getTeamGroupMap()
 
     const decorated: TeamRow[] = teams.map((t) => {
+      const raw = t as unknown as Record<string, unknown>
       const dbMeta = teamGroupDb.get(t.id)
-      const inMem = inMemoryMap.get(t.id) || inMemoryMap.get((t.name as string).toLowerCase().trim())
+      const rawName = typeof raw['name'] === 'string' ? raw['name'] : ''
+      const inMem = inMemoryMap.get(t.id) || inMemoryMap.get(rawName.toLowerCase().trim())
+      const rawRound = typeof raw['round'] === 'number' ? raw['round'] : undefined
+      const rawGroup = typeof raw['group_number'] === 'number' ? raw['group_number'] : undefined
       return {
         ...t,
-        round: dbMeta?.round ?? inMem?.round ?? (t as TeamRow).round ?? 1,
-        group_number: dbMeta?.group_number ?? inMem?.groupNumber ?? (t as TeamRow).group_number ?? 1,
+        round: dbMeta?.round ?? inMem?.round ?? rawRound ?? 1,
+        group_number: dbMeta?.group_number ?? inMem?.groupNumber ?? rawGroup ?? 1,
       } as TeamRow
     })
 
