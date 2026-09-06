@@ -7,6 +7,7 @@ import {
   getMatches,
   getMatchScores,
   getOrCreateMatch,
+  createNextMatchForGroup,
   saveScores,
   resetScores,
   setTeamAliveStatus,
@@ -331,11 +332,12 @@ export default function LivePointsTableSection({ className = '' }: Props) {
   // Maps are fixed — only Miramar, Erangel, Rondo
   const uniqueMaps = ALLOWED_MAPS
 
-  // All matches for the current group, sorted by match_number (ascending = chronological)
+  // All matches for the current group and round, sorted by match_number (ascending = chronological)
   const currentGroupMatches = useMemo(() => {
     const grp = currentMatch?.group_number ?? 1
+    const rnd = currentMatch?.round ?? 1
     return matches
-      .filter((m) => m.group_number === grp)
+      .filter((m) => m.group_number === grp && m.round === rnd)
       .sort((a, b) => a.match_number - b.match_number)
   }, [matches, currentMatch])
 
@@ -345,6 +347,40 @@ export default function LivePointsTableSection({ className = '' }: Props) {
     const idx = currentGroupMatches.findIndex((m) => m.id === currentMatch.id)
     return idx >= 0 ? idx + 1 : 1
   }, [currentMatch, currentGroupMatches])
+
+  const [isCreatingNextMatch, setIsCreatingNextMatch] = useState(false)
+
+  const handleCreateNextMatch = async () => {
+    if (!currentMatch) return
+    setIsCreatingNextMatch(true)
+    const grp = currentMatch.group_number ?? 1
+    const rnd = currentMatch.round ?? 1
+    try {
+      const res = await createNextMatchForGroup(rnd, grp)
+      if (res.success && res.data) {
+        const newMatch = res.data
+        setMatches((prev) =>
+          prev.some((m) => m.id === newMatch.id)
+            ? prev
+            : [...prev, newMatch].sort((a, b) => a.match_number - b.match_number)
+        )
+        handleMatchChange(newMatch.id)
+        setStatusMessage({
+          type: 'success',
+          text: `Created fresh Match for Group ${grp} (${newMatch.map})!`,
+        })
+      } else {
+        setStatusMessage({
+          type: 'error',
+          text: res.error || 'Failed to create next match.',
+        })
+      }
+    } catch {
+      setStatusMessage({ type: 'error', text: 'Error creating next match.' })
+    } finally {
+      setIsCreatingNextMatch(false)
+    }
+  }
 
   // Handle changing round/group/map/match dropdowns
   const handleSelectAttribute = async (
@@ -729,19 +765,32 @@ export default function LivePointsTableSection({ className = '' }: Props) {
           <label htmlFor="select-scoring-match-number" className="points-selector-label">
             MATCH (THIS GROUP)
           </label>
-          <select
-            id="select-scoring-match-number"
-            className="select points-select"
-            value={selectedMatchId}
-            onChange={(e) => handleSelectAttribute('match', e.target.value)}
-            disabled={matchesLoading}
-          >
-            {currentGroupMatches.map((m, idx) => (
-              <option key={m.id} value={m.id}>
-                Match {idx + 1} · {m.map} ({m.status.toUpperCase()})
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <select
+              id="select-scoring-match-number"
+              className="select points-select"
+              value={selectedMatchId}
+              onChange={(e) => handleSelectAttribute('match', e.target.value)}
+              disabled={matchesLoading}
+            >
+              {currentGroupMatches.map((m, idx) => (
+                <option key={m.id} value={m.id}>
+                  Match {idx + 1} · {m.map} ({m.status.toUpperCase()})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              id="btn-add-next-match-for-group"
+              className="btn btn--secondary btn--sm"
+              onClick={handleCreateNextMatch}
+              disabled={isCreatingNextMatch || matchesLoading}
+              title={`Start Match ${currentGroupMatches.length + 1} for Group ${currentMatch?.group_number ?? 1}`}
+              style={{ padding: '6px 10px', whiteSpace: 'nowrap', fontWeight: 700 }}
+            >
+              {isCreatingNextMatch ? '...' : '+ Match'}
+            </button>
+          </div>
         </div>
 
         {/* Auto-sort toggle */}

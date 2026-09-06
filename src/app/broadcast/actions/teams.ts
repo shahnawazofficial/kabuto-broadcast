@@ -23,55 +23,79 @@ function getTeamGroupMap() {
   return globalThis.__kabutoTeamGroup
 }
 
+import { fetchTeamsWithRoundGroup } from '@/app/broadcast/actions/teams-query'
+
 // ─── Fetch Teams with Round & Group ───────────────────────────────────────────
 
 export async function getTeamsWithRoundGroup(): Promise<{ success: boolean; data: TeamRow[]; error?: string }> {
   try {
-    const supabase = await createClient()
-
-    // 1. Fetch all teams
-    const { data: teams, error } = await supabase
-      .from('teams')
-      .select('*')
-      .order('name', { ascending: true })
-
-    if (error) return { success: false, data: [], error: error.message }
-
-    // 2. Fetch persistent team-to-group mappings from live_scores joined with matches
-    const { data: scoreLinks } = await supabase
-      .from('live_scores')
-      .select('team_id, updated_at, matches(id, round, group_number)')
-      .order('updated_at', { ascending: false })
-
-    const teamGroupDb = new Map<string, { round: number; group_number: number }>()
-    scoreLinks?.forEach((s) => {
-      if (!teamGroupDb.has(s.team_id)) {
-        const m = s.matches as unknown as { round: number; group_number: number } | null
-        if (m && typeof m.group_number === 'number') {
-          teamGroupDb.set(s.team_id, {
-            round: typeof m.round === 'number' ? m.round : 1,
-            group_number: m.group_number,
-          })
-        }
-      }
-    })
-
-    const inMemoryMap = getTeamGroupMap()
-
-    // 3. Decorate each team with its true persistent group & round
-    const decorated = (teams ?? []).map((t) => {
-      const dbMeta = teamGroupDb.get(t.id)
-      const inMem = inMemoryMap.get(t.id) || inMemoryMap.get(t.name.toLowerCase().trim())
-      return {
-        ...t,
-        round: dbMeta?.round ?? inMem?.round ?? t.round ?? 1,
-        group_number: dbMeta?.group_number ?? inMem?.groupNumber ?? t.group_number ?? 1,
-      }
-    })
-
-    return { success: true, data: decorated }
+    const data = await fetchTeamsWithRoundGroup()
+    return { success: true, data }
   } catch (err: unknown) {
     return { success: false, data: [], error: err instanceof Error ? err.message : 'Failed to fetch teams.' }
+  }
+}
+
+// ─── Bulk Assign Teams to Round & Group ───────────────────────────────────────
+
+export async function assignTeamsToGroup(
+  teamIds: string[],
+  round: number,
+  groupNumber: number
+): Promise<ActionResult> {
+  try {
+    if (!teamIds || teamIds.length === 0) return { success: false, error: 'No teams selected.' }
+    const supabase = await createClient()
+
+    // 1. Find or create Match for this round & group
+    let matchId: string | null = null
+    const { data: existingMatches } = await supabase
+      .from('matches')
+      .select('id, match_number')
+      .eq('round', round)
+      .eq('group_number', groupNumber)
+      .order('match_number', { ascending: true })
+      .limit(1)
+
+    if (existingMatches && existingMatches.length > 0) {
+      matchId = existingMatches[0].id
+    } else {
+      const matchRes = await getOrCreateMatch(round, groupNumber, 'Miramar')
+      if (matchRes.success && matchRes.data) {
+        matchId = matchRes.data.id
+      }
+    }
+
+    // 2. Remove unplayed/0-point score links for these teams from other groups so they cleanly migrate
+    await supabase
+      .from('live_scores')
+      .delete()
+      .in('team_id', teamIds)
+      .eq('kills', 0)
+      .eq('points', 0)
+
+    // 3. Link each team to this group match
+    if (matchId) {
+      const now = new Date().toISOString()
+      const scoreRows = teamIds.map((tid) => ({
+        match_id: matchId!,
+        team_id: tid,
+        kills: 0,
+        points: 0,
+        position: null,
+        updated_at: now,
+      }))
+      await supabase.from('live_scores').upsert(scoreRows, { onConflict: 'match_id,team_id' })
+    }
+
+    const inMem = getTeamGroupMap()
+    teamIds.forEach((id) => inMem.set(id, { round, groupNumber }))
+
+    revalidatePath('/broadcast')
+    revalidatePath('/overlay/points')
+    return { success: true }
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to assign teams.' }
   }
 }
 

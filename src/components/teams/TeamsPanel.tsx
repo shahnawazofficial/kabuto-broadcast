@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useTransition, useMemo } from 'react'
 import { TeamRow } from '@/types/database'
-import { deleteTeam, deleteTeamsBatch, getTeamsWithRoundGroup } from '@/app/broadcast/actions/teams'
+import { deleteTeam, deleteTeamsBatch, getTeamsWithRoundGroup, assignTeamsToGroup } from '@/app/broadcast/actions/teams'
 import TeamFormModal from './TeamFormModal'
 import ImportTeamsModal, { ImportSuccessInfo } from './ImportTeamsModal'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -20,10 +20,12 @@ export default function TeamsPanel() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isDeleting, startDeleteTransition] = useTransition()
 
-  // Multi-selection state & batch delete
+  // Multi-selection state & batch delete / move
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set())
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false)
   const [isBatchDeleting, startBatchDeleteTransition] = useTransition()
+  const [targetAssignGroup, setTargetAssignGroup] = useState<string>('R1-G2')
+  const [isAssigning, startAssignTransition] = useTransition()
 
   // Filter state & notification banner
   const [selectedFilter, setSelectedFilter] = useState<string>('all')
@@ -81,6 +83,43 @@ export default function TeamsPanel() {
         fetchTeams()
       } else {
         setDeleteError(result.error ?? 'Failed to delete selected teams.')
+      }
+    })
+  }
+
+  const handleBatchAssign = (groupKey: string) => {
+    if (selectedTeamIds.size === 0) return
+    const match = groupKey.match(/^R(\d+)-G(\d+)$/)
+    if (!match) return
+    const round = parseInt(match[1], 10)
+    const group = parseInt(match[2], 10)
+    const ids = Array.from(selectedTeamIds)
+    startAssignTransition(async () => {
+      const res = await assignTeamsToGroup(ids, round, group)
+      if (res.success) {
+        setBannerMessage({
+          type: 'success',
+          text: `Moved ${ids.length} team(s) to Round ${round} · Group ${group}!`,
+        })
+        fetchTeams()
+      } else {
+        setBannerMessage({
+          type: 'error',
+          text: res.error || 'Failed to move teams.',
+        })
+      }
+    })
+  }
+
+  const handleSingleTeamAssign = (teamId: string, groupKey: string) => {
+    const match = groupKey.match(/^R(\d+)-G(\d+)$/)
+    if (!match) return
+    const round = parseInt(match[1], 10)
+    const group = parseInt(match[2], 10)
+    startAssignTransition(async () => {
+      const res = await assignTeamsToGroup([teamId], round, group)
+      if (res.success) {
+        fetchTeams()
       }
     })
   }
@@ -277,7 +316,39 @@ export default function TeamsPanel() {
               Clear
             </button>
           </div>
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '12px', color: 'var(--clr-text-2)', fontWeight: 600 }}>
+                Move to:
+              </span>
+              <select
+                id="select-bulk-target-group"
+                className="field-select"
+                style={{ padding: '4px 8px', fontSize: '12px', width: 'auto', background: 'var(--clr-bg-3)' }}
+                value={targetAssignGroup}
+                onChange={(e) => setTargetAssignGroup(e.target.value)}
+                disabled={isAssigning}
+              >
+                <option value="R1-G1">Round 1 · Group 1</option>
+                <option value="R1-G2">Round 1 · Group 2</option>
+                <option value="R1-G3">Round 1 · Group 3</option>
+                <option value="R1-G4">Round 1 · Group 4</option>
+                <option value="R1-G5">Round 1 · Group 5</option>
+                <option value="R2-G1">Round 2 · Group 1</option>
+                <option value="R2-G2">Round 2 · Group 2</option>
+                <option value="R3-G1">Round 3 · Group 1</option>
+              </select>
+              <button
+                type="button"
+                id="btn-apply-bulk-assign"
+                className="btn btn--secondary btn--sm"
+                onClick={() => handleBatchAssign(targetAssignGroup)}
+                disabled={isAssigning}
+                style={{ fontWeight: 700 }}
+              >
+                {isAssigning ? 'Moving...' : 'Apply Move'}
+              </button>
+            </div>
             <button
               id="btn-bulk-delete-confirm"
               type="button"
@@ -449,18 +520,47 @@ export default function TeamsPanel() {
                       <span className="tag-badge">{team.tag}</span>
                     </td>
                     <td>
-                      <span
-                        className="tag-badge"
+                      <select
+                        aria-label={`Change group for ${team.name}`}
                         style={{
-                          background: 'rgba(245, 158, 11, 0.12)',
-                          color: 'var(--clr-accent)',
-                          fontWeight: 700,
+                          padding: '3px 8px',
                           fontSize: '11px',
-                          border: '1px solid rgba(245, 158, 11, 0.3)',
+                          fontWeight: 700,
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          outline: 'none',
+                          border: `1px solid ${
+                            team.group_number === 1 ? 'rgba(245, 158, 11, 0.4)' :
+                            team.group_number === 2 ? 'rgba(56, 189, 248, 0.4)' :
+                            team.group_number === 3 ? 'rgba(52, 211, 153, 0.4)' :
+                            'rgba(168, 85, 247, 0.4)'
+                          }`,
+                          background: `${
+                            team.group_number === 1 ? 'rgba(245, 158, 11, 0.15)' :
+                            team.group_number === 2 ? 'rgba(56, 189, 248, 0.15)' :
+                            team.group_number === 3 ? 'rgba(52, 211, 153, 0.15)' :
+                            'rgba(168, 85, 247, 0.15)'
+                          }`,
+                          color: `${
+                            team.group_number === 1 ? '#fbbf24' :
+                            team.group_number === 2 ? '#38bdf8' :
+                            team.group_number === 3 ? '#34d399' :
+                            '#c084fc'
+                          }`,
                         }}
+                        value={`R${team.round || 1}-G${team.group_number || 1}`}
+                        onChange={(e) => handleSingleTeamAssign(team.id, e.target.value)}
+                        disabled={isAssigning}
                       >
-                        Round {team.round || 1} · Group {team.group_number || 1}
-                      </span>
+                        <option value="R1-G1">Round 1 · Group 1</option>
+                        <option value="R1-G2">Round 1 · Group 2</option>
+                        <option value="R1-G3">Round 1 · Group 3</option>
+                        <option value="R1-G4">Round 1 · Group 4</option>
+                        <option value="R1-G5">Round 1 · Group 5</option>
+                        <option value="R2-G1">Round 2 · Group 1</option>
+                        <option value="R2-G2">Round 2 · Group 2</option>
+                        <option value="R3-G1">Round 3 · Group 1</option>
+                      </select>
                     </td>
                     <td>
                       <div className="row-actions">

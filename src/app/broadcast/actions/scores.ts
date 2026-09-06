@@ -177,6 +177,28 @@ export async function getOrCreateMatch(
       return { success: true, data: fallback }
     }
 
+    if (inserted) {
+      // Find all teams belonging to this round and group and seed initial live_score entries
+      const allDecorated = await fetchTeamsWithRoundGroup()
+      const groupTeams = allDecorated.filter((t) => {
+        const raw = t as unknown as Record<string, unknown>
+        const tRound = typeof raw['round'] === 'number' ? raw['round'] : 1
+        const tGroup = typeof raw['group_number'] === 'number' ? raw['group_number'] : 1
+        return tRound === round && tGroup === groupNumber
+      })
+      if (groupTeams.length > 0) {
+        const scoreRows = groupTeams.map((t) => ({
+          match_id: inserted.id,
+          team_id: t.id,
+          kills: 0,
+          points: 0,
+          position: null,
+          updated_at: new Date().toISOString(),
+        }))
+        await supabase.from('live_scores').insert(scoreRows)
+      }
+    }
+
     revalidatePath('/broadcast')
     revalidatePath('/overlay/points')
     return { success: true, data: inserted }
@@ -192,6 +214,84 @@ export async function getOrCreateMatch(
       updated_at: new Date().toISOString(),
     }
     return { success: true, data: fallback }
+  }
+}
+
+// ─── Create explicit Next Match for a Group (Match 2, 3, etc.) ───────────────
+
+export async function createNextMatchForGroup(
+  round: number,
+  groupNumber: number,
+  map?: string
+): Promise<ActionResult<MatchRow>> {
+  try {
+    const supabase = await createClient()
+
+    // 1. Find existing matches for this round & group to pick next map
+    const { data: groupMatches } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('round', round)
+      .eq('group_number', groupNumber)
+      .order('match_number', { ascending: true })
+
+    const count = groupMatches?.length || 0
+    const maps = ['Erangel', 'Miramar', 'Rondo']
+    const chosenMap = map || maps[count % maps.length]
+
+    // 2. Compute next global match_number
+    const { data: allMatches } = await supabase
+      .from('matches')
+      .select('match_number')
+      .order('match_number', { ascending: false })
+      .limit(1)
+
+    const nextMatchNum = (allMatches && allMatches[0]?.match_number ? allMatches[0].match_number : 0) + 1
+
+    const newMatch = {
+      round,
+      group_number: groupNumber,
+      map: chosenMap,
+      match_number: nextMatchNum,
+      status: 'pending' as MatchStatus,
+    }
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from('matches')
+      .insert(newMatch)
+      .select()
+      .single()
+
+    if (insertErr || !inserted) {
+      return { success: false, error: insertErr?.message || 'Failed to create match.' }
+    }
+
+    // 3. Seed with all teams belonging to this round & group
+    const allDecorated = await fetchTeamsWithRoundGroup()
+    const groupTeams = allDecorated.filter((t) => {
+      const raw = t as unknown as Record<string, unknown>
+      const tRound = typeof raw['round'] === 'number' ? raw['round'] : 1
+      const tGroup = typeof raw['group_number'] === 'number' ? raw['group_number'] : 1
+      return tRound === round && tGroup === groupNumber
+    })
+
+    if (groupTeams.length > 0) {
+      const scoreRows = groupTeams.map((t) => ({
+        match_id: inserted.id,
+        team_id: t.id,
+        kills: 0,
+        points: 0,
+        position: null,
+        updated_at: new Date().toISOString(),
+      }))
+      await supabase.from('live_scores').insert(scoreRows)
+    }
+
+    revalidatePath('/broadcast')
+    revalidatePath('/overlay/points')
+    return { success: true, data: inserted }
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to create next match.' }
   }
 }
 

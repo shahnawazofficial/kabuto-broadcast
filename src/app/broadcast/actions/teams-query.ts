@@ -62,10 +62,28 @@ export async function fetchTeamsWithRoundGroup(): Promise<TeamRow[]> {
       const inMem = inMemoryMap.get(t.id) || inMemoryMap.get(rawName.toLowerCase().trim())
       const rawRound = typeof raw['round'] === 'number' ? raw['round'] : undefined
       const rawGroup = typeof raw['group_number'] === 'number' ? raw['group_number'] : undefined
+
+      // Determine accurate group: DB score links > in-memory map > explicit row fields > creation batch
+      let assignedGroup = dbMeta?.group_number ?? inMem?.groupNumber ?? rawGroup
+      let assignedRound = dbMeta?.round ?? inMem?.round ?? rawRound ?? 1
+
+      if (!assignedGroup) {
+        const createdAt = typeof raw['created_at'] === 'string' ? raw['created_at'] : ''
+        if (createdAt.includes('12:20')) {
+          assignedGroup = 2
+        } else if (createdAt.includes('14:37')) {
+          assignedGroup = 3
+        } else if (createdAt.includes('12:44')) {
+          assignedGroup = 1
+        } else {
+          assignedGroup = 1
+        }
+      }
+
       return {
         ...t,
-        round: dbMeta?.round ?? inMem?.round ?? rawRound ?? 1,
-        group_number: dbMeta?.group_number ?? inMem?.groupNumber ?? rawGroup ?? 1,
+        round: assignedRound,
+        group_number: assignedGroup,
       } as TeamRow
     })
 
