@@ -80,19 +80,45 @@ export default function TeamFormModal({ team, isOpen, onClose, onSuccess }: Prop
           />
         </div>
 
-        <div className="form-field">
-          <label className="field-label" htmlFor="team-logo">Logo URL</label>
-          <input
-            id="team-logo"
-            name="logo_url"
-            type="url"
-            className="field-input"
-            placeholder="https://…"
-            defaultValue={team?.logo_url ?? ''}
-          />
+        <div className="match-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div className="form-field">
+            <label className="field-label" htmlFor="team-round">Round</label>
+            <select
+              id="team-round"
+              name="round"
+              className="field-select"
+              defaultValue={team?.round ?? 1}
+            >
+              <option value={1}>Round 1</option>
+              <option value={2}>Round 2</option>
+              <option value={3}>Round 3</option>
+              <option value={4}>Round 4</option>
+              <option value={5}>Round 5</option>
+            </select>
+          </div>
+
+          <div className="form-field">
+            <label className="field-label" htmlFor="team-group">Group</label>
+            <select
+              id="team-group"
+              name="group_number"
+              className="field-select"
+              defaultValue={team?.group_number ?? 1}
+            >
+              <option value={1}>Group 1</option>
+              <option value={2}>Group 2</option>
+              <option value={3}>Group 3</option>
+              <option value={4}>Group 4</option>
+              <option value={5}>Group 5</option>
+              <option value={6}>Group 6</option>
+              <option value={7}>Group 7</option>
+              <option value={8}>Group 8</option>
+            </select>
+          </div>
         </div>
 
         {error && <p className="form-error" role="alert">{error}</p>}
+
 
         <div className="form-actions">
           <button type="button" className="btn btn--ghost" onClick={handleClose} disabled={isPending}>

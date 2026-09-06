@@ -7,11 +7,11 @@ export const metadata: Metadata = {
 }
 
 interface PageProps {
-  searchParams: Promise<{ matchId?: string }>
+  searchParams: Promise<{ matchId?: string; layout?: 'hud' | 'full' }>
 }
 
 export default async function OverlayPointsPage({ searchParams }: PageProps) {
-  const { matchId } = await searchParams
+  const { matchId, layout } = await searchParams
 
-  return <PointsOverlay initialMatchId={matchId} />
+  return <PointsOverlay initialMatchId={matchId} initialLayout={layout ?? 'hud'} />
 }

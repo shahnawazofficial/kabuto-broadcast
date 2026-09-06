@@ -11,11 +11,11 @@ export function createClient() {
 
   const validUrl = envUrl && (envUrl.startsWith('http://') || envUrl.startsWith('https://'))
     ? envUrl
-    : 'https://placeholder-project.supabase.co'
+    : 'https://slgyvivvdagayvwrmztl.supabase.co'
 
   const validKey = envKey && envKey.length > 5
     ? envKey
-    : 'placeholder-anon-key-for-local-dev'
+    : 'sb_publishable_tmXCPs6_KoBSh4PsbXqePw_Au4421kM'
 
   return createBrowserClient<Database>(validUrl, validKey)
 }

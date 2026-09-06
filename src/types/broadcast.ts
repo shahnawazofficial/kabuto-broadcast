@@ -1,7 +1,15 @@
 // ─── Broadcast shared types ────────────────────────────────────────────────
 
 export type Round = 'Round 1' | 'Round 2' | 'Round 3' | 'Round 4' | 'Round 5'
-export type Group = 'Group 1' | 'Group 2' | 'Group 3' | 'Group 4'
+export type Group =
+  | 'Group 1'
+  | 'Group 2'
+  | 'Group 3'
+  | 'Group 4'
+  | 'Group 5'
+  | 'Group 6'
+  | 'Group 7'
+  | 'Group 8'
 export type BGMap = 'Erangel' | 'Miramar' | 'Sanhok' | 'Vikendi'
 export type Match = 'Match 1' | 'Match 2' | 'Match 3' | 'Match 4' | 'Match 5' | 'Match 6'
 
@@ -57,6 +65,15 @@ export const OVERLAY_STATUS_ITEMS: OverlayStatusItem[] = [
 ]
 
 export const ROUNDS: Round[] = ['Round 1', 'Round 2', 'Round 3', 'Round 4', 'Round 5']
-export const GROUPS: Group[] = ['Group 1', 'Group 2', 'Group 3', 'Group 4']
+export const GROUPS: Group[] = [
+  'Group 1',
+  'Group 2',
+  'Group 3',
+  'Group 4',
+  'Group 5',
+  'Group 6',
+  'Group 7',
+  'Group 8',
+]
 export const MAPS: BGMap[] = ['Erangel', 'Miramar', 'Sanhok', 'Vikendi']
 export const MATCHES: Match[] = ['Match 1', 'Match 2', 'Match 3', 'Match 4', 'Match 5', 'Match 6']

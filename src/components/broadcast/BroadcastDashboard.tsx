@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { MatchInfo, OverlayKey, OverlayState } from '@/types/broadcast'
 import CurrentMatchSection from '@/components/broadcast/CurrentMatchSection'
 import BroadcastControlsSection from '@/components/broadcast/BroadcastControlsSection'
@@ -10,8 +10,8 @@ import OverlayStatusSection from '@/components/broadcast/OverlayStatusSection'
 import LivePointsTableSection from '@/components/broadcast/LivePointsTableSection'
 import MatchGraphicSection from '@/components/broadcast/MatchGraphicSection'
 
-import { toggleBroadcastOverlay } from '@/app/broadcast/actions/broadcast'
-import { notifyRealtimeChange } from '@/lib/supabase/realtime'
+import { getBroadcastState, toggleBroadcastOverlay } from '@/app/broadcast/actions/broadcast'
+import { notifyRealtimeChange, subscribeToRealtimeTables } from '@/lib/supabase/realtime'
 
 const DEFAULT_MATCH: MatchInfo = {
   round: 'Round 1',
@@ -35,6 +35,30 @@ interface Props {
 export default function BroadcastDashboard({ embedded = false }: Props) {
   const [matchInfo, setMatchInfo] = useState<MatchInfo>(DEFAULT_MATCH)
   const [overlays, setOverlays] = useState<OverlayState>(DEFAULT_OVERLAYS)
+
+  const syncBroadcastState = useCallback(async () => {
+    try {
+      const res = await getBroadcastState()
+      if (res.success && res.data) {
+        setOverlays({
+          pointsTable: !!res.data.show_points,
+          playerGraphic: !!res.data.show_player,
+          eliminationGraphic: !!res.data.show_elimination,
+          matchGraphic: !!res.data.show_match,
+        })
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    syncBroadcastState()
+    const unsubscribe = subscribeToRealtimeTables({
+      channelName: 'dashboard-overlays-sync',
+      tables: ['broadcast_state'],
+      onChange: () => syncBroadcastState(),
+    })
+    return () => unsubscribe()
+  }, [syncBroadcastState])
 
   const toggleOverlay = useCallback((key: OverlayKey) => {
     setOverlays((prev) => {

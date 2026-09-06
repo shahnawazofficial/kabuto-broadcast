@@ -18,9 +18,12 @@ export type TeamRow = {
   name: string
   tag: string
   logo_url: string | null
+  round?: number
+  group_number?: number
   created_at: string
   updated_at: string
 }
+
 
 export type PlayerRow = {
   id: string
@@ -74,9 +77,12 @@ export type TeamInsert = {
   name: string
   tag: string
   logo_url?: string | null
+  round?: number
+  group_number?: number
   created_at?: string
   updated_at?: string
 }
+
 
 export type PlayerInsert = {
   id?: string

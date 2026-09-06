@@ -35,16 +35,19 @@ export default function TeamEliminationSection({ onActivate }: Props) {
 
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-  // 1. Fetch teams & broadcast state
+  // 1. Fetch teams & broadcast state on mount
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
       const teamsRes = await getTeamsAndPlayers()
       if (teamsRes.success && teamsRes.data?.teams && teamsRes.data.teams.length > 0) {
         setTeams(teamsRes.data.teams)
-        if (!selectedTeamId || !teamsRes.data.teams.some((t) => t.id === selectedTeamId)) {
-          setSelectedTeamId(teamsRes.data.teams[0].id)
-        }
+        setSelectedTeamId((prev) => {
+          if (!prev || !teamsRes.data?.teams.some((t) => t.id === prev)) {
+            return teamsRes.data?.teams[0].id || prev
+          }
+          return prev
+        })
       }
 
       const stateRes = await getBroadcastState()
@@ -64,7 +67,7 @@ export default function TeamEliminationSection({ onActivate }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [selectedTeamId])
+  }, [])
 
   useEffect(() => {
     loadData()
@@ -286,6 +289,31 @@ export default function TeamEliminationSection({ onActivate }: Props) {
               Hide Elimination Now
             </button>
           )}
+        </div>
+
+        {/* OBS Stream Links & Quick Actions */}
+        <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs">
+          <a
+            href="/overlay/elimination?preview=true"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 transition-colors"
+          >
+            👁️ Preview Overlay (New Tab)
+          </a>
+          <button
+            type="button"
+            className="text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded transition-colors"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                navigator.clipboard.writeText(`${window.location.origin}/overlay/elimination`)
+                setFeedback('Copied OBS URL to clipboard: /overlay/elimination (1920x1080)')
+                setTimeout(() => setFeedback(null), 3000)
+              }
+            }}
+          >
+            📋 Copy OBS URL
+          </button>
         </div>
       </div>
     </section>

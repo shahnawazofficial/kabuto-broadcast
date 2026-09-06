@@ -422,8 +422,8 @@ export async function getLiveEliminationOverlayData(): Promise<ActionResult<Elim
 
     if (state) {
       showElimination = state.show_elimination
-      eliminationTeamId = state.elimination_team_id
-      eliminationKills = state.elimination_kills ?? 0
+      eliminationTeamId = state.elimination_team_id || eliminationTeamId
+      eliminationKills = state.elimination_kills ?? eliminationKills ?? 0
       if (state.updated_at) {
         eliminatedAt = new Date(state.updated_at).getTime()
       }
@@ -441,7 +441,7 @@ export async function getLiveEliminationOverlayData(): Promise<ActionResult<Elim
     // Supabase offline fallback
   }
 
-  if (!showElimination || !eliminationTeamId) {
+  if (!showElimination) {
     return {
       success: true,
       data: {
@@ -453,10 +453,31 @@ export async function getLiveEliminationOverlayData(): Promise<ActionResult<Elim
     }
   }
 
-  const resolvedTeam =
-    dbTeam ??
-    FALLBACK_TEAMS_DATA.find((t) => t.id === eliminationTeamId) ??
-    FALLBACK_TEAMS_DATA[0]
+  // Gracefully resolve team: dbTeam -> by ID in fallback list -> first DB team -> first fallback team
+  let resolvedTeam: TeamRow | null = dbTeam
+  if (!resolvedTeam && eliminationTeamId) {
+    resolvedTeam = FALLBACK_TEAMS_DATA.find((t) => t.id === eliminationTeamId) ?? null
+  }
+
+  if (!resolvedTeam) {
+    try {
+      const supabase = await createClient()
+      const { data: firstTeam } = await supabase
+        .from('teams')
+        .select('*')
+        .limit(1)
+        .maybeSingle()
+      if (firstTeam) {
+        resolvedTeam = firstTeam
+      }
+    } catch {
+      // offline fallback
+    }
+  }
+
+  if (!resolvedTeam) {
+    resolvedTeam = FALLBACK_TEAMS_DATA[0]
+  }
 
   return {
     success: true,
@@ -518,11 +539,18 @@ export async function toggleBroadcastOverlay(
     ;(local as Record<string, unknown>)[field] = enabled
   }
 
+  if (key === 'eliminationGraphic' && enabled) {
+    if (!local.elimination_team_id) {
+      local.elimination_team_id = FALLBACK_TEAMS_DATA[0].id
+    }
+    local.eliminated_at = Date.now()
+  }
+
   try {
     const supabase = await createClient()
     const { data: existing } = await supabase
       .from('broadcast_state')
-      .select('id')
+      .select('id, elimination_team_id')
       .limit(1)
       .maybeSingle()
 
@@ -532,7 +560,13 @@ export async function toggleBroadcastOverlay(
       }
       if (key === 'pointsTable') updatePayload.show_points = enabled
       if (key === 'playerGraphic') updatePayload.show_player = enabled
-      if (key === 'eliminationGraphic') updatePayload.show_elimination = enabled
+      if (key === 'eliminationGraphic') {
+        updatePayload.show_elimination = enabled
+        if (enabled && !existing.elimination_team_id) {
+          const { data: firstTeam } = await supabase.from('teams').select('id').limit(1).maybeSingle()
+          updatePayload.elimination_team_id = firstTeam?.id || FALLBACK_TEAMS_DATA[0].id
+        }
+      }
       if (key === 'matchGraphic') updatePayload.show_match = enabled
 
       await supabase

@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import type { TeamRow } from '@/types/database'
 import {
   getLiveEliminationOverlayData,
@@ -9,15 +11,27 @@ import {
 } from '@/app/broadcast/actions/broadcast'
 import { subscribeToRealtimeTables } from '@/lib/supabase/realtime'
 
-
 type AnimationPhase = 'entering' | 'visible' | 'exiting' | 'hidden'
 
-export default function EliminationOverlay() {
-  const [team, setTeam] = useState<TeamRow | null>(null)
-  const [kills, setKills] = useState<number>(0)
-  const [animationPhase, setAnimationPhase] = useState<AnimationPhase>('hidden')
+const PREVIEW_TEAM: TeamRow = {
+  id: 'team-preview',
+  name: 'GodLike Esports',
+  tag: 'GODL',
+  logo_url: null,
+  created_at: '',
+  updated_at: '',
+}
 
-  const lastEliminatedAtRef = useRef<number>(0)
+export default function EliminationOverlay() {
+  const searchParams = useSearchParams()
+  const isPreview = searchParams.get('preview') === 'true' || searchParams.get('test') === 'true'
+
+  const [team, setTeam] = useState<TeamRow | null>(isPreview ? PREVIEW_TEAM : null)
+  const [kills, setKills] = useState<number>(isPreview ? 7 : 0)
+  const [animationPhase, setAnimationPhase] = useState<AnimationPhase>(isPreview ? 'visible' : 'hidden')
+  const [isObs, setIsObs] = useState<boolean>(false)
+
+  const lastEventIdRef = useRef<string>('')
   const exitTimerRef = useRef<NodeJS.Timeout | null>(null)
   const hideTimerRef = useRef<NodeJS.Timeout | null>(null)
   const enterTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -29,6 +43,33 @@ export default function EliminationOverlay() {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
   }
 
+  // Detect OBS Browser Source environment
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as unknown as { obsstudio?: unknown }).obsstudio) {
+      setIsObs(true)
+    }
+  }, [])
+
+  // Trigger test animation locally for testing / staging
+  const triggerLocalTest = useCallback(() => {
+    clearAllTimers()
+    if (!team) setTeam(PREVIEW_TEAM)
+    setKills((prev) => (prev > 0 ? prev : 7))
+    setAnimationPhase('entering')
+
+    enterTimerRef.current = setTimeout(() => {
+      setAnimationPhase('visible')
+    }, 450)
+
+    exitTimerRef.current = setTimeout(() => {
+      setAnimationPhase('exiting')
+    }, 5400)
+
+    hideTimerRef.current = setTimeout(() => {
+      setAnimationPhase(isPreview ? 'visible' : 'hidden')
+    }, 6000)
+  }, [team, isPreview])
+
   // Fetch live elimination state from broadcast_state via server action
   const fetchOverlayData = useCallback(async () => {
     try {
@@ -39,60 +80,51 @@ export default function EliminationOverlay() {
 
       // If server says hidden or team is missing
       if (!showElimination || !newTeam) {
-        if (animationPhase !== 'hidden') {
+        if (animationPhase !== 'hidden' && !isPreview) {
           clearAllTimers()
-          setAnimationPhase('hidden')
+          setAnimationPhase('exiting')
+          exitTimerRef.current = setTimeout(() => {
+            setAnimationPhase('hidden')
+          }, 550)
         }
         return
       }
 
-      // If this is a new elimination event (or initial load within 5s window)
-      if (eliminatedAt && eliminatedAt !== lastEliminatedAtRef.current) {
-        const now = Date.now()
-        const elapsed = now - eliminatedAt
-
-        // If the event is older than 5 seconds, auto-expire without showing
-        if (elapsed >= 5000) {
-          lastEliminatedAtRef.current = eliminatedAt
-          clearAllTimers()
-          setAnimationPhase('hidden')
-          hideTeamEliminated().catch(() => {})
-          return
-        }
-
-        // Fresh elimination trigger within the 5s window!
-        lastEliminatedAtRef.current = eliminatedAt
+      // Active elimination event from broadcast!
+      const eventId = `${newTeam.id}-${eliminatedAt || 0}-${newKills}`
+      if (eventId !== lastEventIdRef.current || animationPhase === 'hidden') {
+        lastEventIdRef.current = eventId
         setTeam(newTeam)
         setKills(newKills)
         clearAllTimers()
 
-        // 1. Enter phase (slam / crimson bloom entrance)
+        // 1. Enter phase (slam / crimson entrance)
         setAnimationPhase('entering')
-
-        const remainingTotal = 5000 - elapsed
-        const entranceDuration = Math.min(450, remainingTotal)
 
         // 2. Visible phase
         enterTimerRef.current = setTimeout(() => {
           setAnimationPhase('visible')
-        }, entranceDuration)
+        }, 450)
 
-        // 3. Exit phase (starts ~600ms before total 5s completes)
-        const exitDelay = Math.max(0, remainingTotal - 600)
+        // 3. Exit phase after 5.4s
         exitTimerRef.current = setTimeout(() => {
           setAnimationPhase('exiting')
-        }, exitDelay)
+        }, 5400)
 
-        // 4. Hidden phase at exactly remainingTotal (complete transparency)
+        // 4. Hidden phase at 6s
         hideTimerRef.current = setTimeout(() => {
-          setAnimationPhase('hidden')
+          setAnimationPhase(isPreview ? 'visible' : 'hidden')
           hideTeamEliminated().catch(() => {})
-        }, remainingTotal)
+        }, 6000)
+      } else {
+        // Just keep values synced if already visible
+        setTeam(newTeam)
+        setKills(newKills)
       }
     } catch {
       // Quiet fail to keep stream uninterrupted
     }
-  }, [animationPhase])
+  }, [animationPhase, isPreview])
 
   // Supabase Realtime subscription — triggers immediately on broadcast_state change
   useEffect(() => {
@@ -112,13 +144,61 @@ export default function EliminationOverlay() {
     }
   }, [fetchOverlayData])
 
-  // If hidden, render completely transparent canvas (nothing visible in OBS)
-  if (animationPhase === 'hidden' || !team) {
-    return <div className="obs-canvas obs-canvas--empty" />
+  // When in hidden phase and not in preview mode:
+  if (animationPhase === 'hidden' && !isPreview) {
+    return (
+      <div className="obs-canvas obs-canvas--empty">
+        {/* Helper pill visible in normal browser, hidden in OBS or clean mode */}
+        {!isObs && (
+          <div className="obs-standby-pill" id="obs-standby-pill">
+            <span className="obs-standby-dot animate-pulse" />
+            <span className="obs-standby-title">ELIMINATION OVERLAY READY</span>
+            <span className="obs-standby-sub">(OBS: 1920x1080 Transparent)</span>
+            <button
+              type="button"
+              className="obs-standby-btn"
+              onClick={triggerLocalTest}
+            >
+              ⚡ Test Knockout
+            </button>
+            <Link href="/broadcast" className="obs-standby-link">
+              Broadcast Control ↗
+            </Link>
+          </div>
+        )}
+      </div>
+    )
   }
+
+  const currentTeam = team || PREVIEW_TEAM
 
   return (
     <div className="obs-canvas">
+      {/* Top Preview Bar for positioning/calibration in OBS or Browser */}
+      {isPreview && (
+        <div className="obs-preview-bar">
+          <div className="flex items-center gap-2">
+            <span className="obs-preview-badge">TEST PREVIEW</span>
+            <span className="text-xs text-white/80 font-mono">1920 × 1080 CANVAS</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="obs-standby-btn"
+              onClick={triggerLocalTest}
+            >
+              ⚡ Replay Animation
+            </button>
+            <Link href="/overlay/elimination" className="obs-standby-link">
+              Switch to Live Standby
+            </Link>
+            <Link href="/broadcast" className="obs-standby-link">
+              Broadcast Control ↗
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* ─── Team Eliminated Floating Esports Banner ─────────────────── */}
       <div className={`obs-elimination-card obs-elimination-card--${animationPhase}`}>
         {/* Top Warning Beam Accent */}
@@ -130,16 +210,21 @@ export default function EliminationOverlay() {
             <span className="obs-elim-skull">☠</span>
             <span className="obs-elim-title">TEAM ELIMINATED</span>
           </div>
+          {isPreview && (
+            <span className="text-[10px] uppercase font-bold tracking-widest text-amber-400/90 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
+              Preview Mode
+            </span>
+          )}
         </div>
 
         {/* Main Content: Team Crest, Names, and Kills Counter */}
         <div className="obs-elim-body">
           {/* Team Crest / Logo Box */}
           <div className="obs-elim-logo-box">
-            {team.logo_url ? (
+            {currentTeam.logo_url ? (
               <Image
-                src={team.logo_url}
-                alt={team.name}
+                src={currentTeam.logo_url}
+                alt={currentTeam.name}
                 width={80}
                 height={80}
                 className="obs-elim-logo-img"
@@ -147,7 +232,7 @@ export default function EliminationOverlay() {
               />
             ) : (
               <div className="obs-elim-logo-fallback">
-                <span>{team.tag || team.name.substring(0, 3)}</span>
+                <span>{currentTeam.tag || currentTeam.name.substring(0, 3)}</span>
               </div>
             )}
           </div>
@@ -155,9 +240,9 @@ export default function EliminationOverlay() {
           {/* Team Info */}
           <div className="obs-elim-team-details">
             <div className="obs-elim-tag-row">
-              <span className="obs-elim-team-tag">[{team.tag}]</span>
+              <span className="obs-elim-team-tag">[{currentTeam.tag}]</span>
             </div>
-            <h2 className="obs-elim-team-name">{team.name}</h2>
+            <h2 className="obs-elim-team-name">{currentTeam.name}</h2>
           </div>
 
           {/* Kills Module */}

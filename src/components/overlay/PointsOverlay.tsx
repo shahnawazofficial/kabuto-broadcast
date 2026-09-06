@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import type { MatchRow } from '@/types/database'
 import { getLiveOverlayData, OverlayScoreEntry } from '@/app/broadcast/actions/scores'
+import { subscribeToRealtimeTables } from '@/lib/supabase/realtime'
 
 // Default fallback data for immediate render & offline resilience
 const DEFAULT_MATCH: MatchRow = {
@@ -17,28 +18,20 @@ const DEFAULT_MATCH: MatchRow = {
   updated_at: '',
 }
 
-const DEFAULT_SCORES: OverlayScoreEntry[] = [
-  { teamId: 't1', teamName: 'Soul Esports',     teamTag: 'SOUL',  logoUrl: null, kills: 12, placement: 1, totalPoints: 22, rank: 1 },
-  { teamId: 't2', teamName: 'Team XSpark',      teamTag: 'TX',    logoUrl: null, kills: 9,  placement: 2, totalPoints: 15, rank: 2 },
-  { teamId: 't3', teamName: 'GodLike Esports',  teamTag: 'GODL',  logoUrl: null, kills: 8,  placement: 3, totalPoints: 13, rank: 3 },
-  { teamId: 't4', teamName: 'Global Esports',   teamTag: 'GE',    logoUrl: null, kills: 6,  placement: 4, totalPoints: 10, rank: 4 },
-  { teamId: 't5', teamName: 'OR Esports',       teamTag: 'OR',    logoUrl: null, kills: 5,  placement: 5, totalPoints: 8,  rank: 5 },
-  { teamId: 't6', teamName: 'Skylightz Gaming', teamTag: 'SKYLZ', logoUrl: null, kills: 4,  placement: 6, totalPoints: 6,  rank: 6 },
-  { teamId: 't7', teamName: '7Sea Esports',     teamTag: '7SEA',  logoUrl: null, kills: 3,  placement: 7, totalPoints: 4,  rank: 7 },
-  { teamId: 't8', teamName: 'Enigma Gaming',    teamTag: 'EG',    logoUrl: null, kills: 2,  placement: 8, totalPoints: 3,  rank: 8 },
-]
-
-import { subscribeToRealtimeTables } from '@/lib/supabase/realtime'
-
 interface Props {
   initialMatchId?: string
+  initialLayout?: 'hud' | 'full'
 }
 
-export default function PointsOverlay({ initialMatchId }: Props) {
+export default function PointsOverlay({ initialMatchId, initialLayout = 'hud' }: Props) {
   const [match, setMatch] = useState<MatchRow>(DEFAULT_MATCH)
-  const [scores, setScores] = useState<OverlayScoreEntry[]>(DEFAULT_SCORES)
+  const [scores, setScores] = useState<OverlayScoreEntry[]>([])
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
+  const [showPoints, setShowPoints] = useState<boolean>(true)
+  const [showStatusBars, setShowStatusBars] = useState<boolean>(true)
+  const [layout] = useState<'hud' | 'full'>(initialLayout)
 
-  // Fetch live overlay data from Supabase
+  // Fetch live overlay data from Supabase / server actions
   const fetchData = useCallback(async () => {
     try {
       const res = await getLiveOverlayData(initialMatchId)
@@ -46,16 +39,25 @@ export default function PointsOverlay({ initialMatchId }: Props) {
         if (res.data.match) {
           setMatch(res.data.match)
         }
-        if (res.data.scores && res.data.scores.length > 0) {
+        if (res.data.scores !== undefined) {
           setScores(res.data.scores)
+        }
+        if (res.data.selectedTeamId !== undefined) {
+          setSelectedTeamId(res.data.selectedTeamId)
+        }
+        if (res.data.showPoints !== undefined) {
+          setShowPoints(res.data.showPoints)
+        }
+        if (res.data.showStatusBars !== undefined) {
+          setShowStatusBars(res.data.showStatusBars)
         }
       }
     } catch {
-      // Quiet fail on network error to keep OBS stream running smoothly
+      // Quiet fail to maintain broadcast uptime
     }
   }, [initialMatchId])
 
-  // Supabase Realtime subscription — updates immediately on live_scores, matches, or broadcast_state changes
+  // Realtime subscription — updates on score changes, match changes, or team highlights
   useEffect(() => {
     fetchData()
 
@@ -72,6 +74,137 @@ export default function PointsOverlay({ initialMatchId }: Props) {
     }
   }, [fetchData])
 
+  // Always render leaderboard on OBS canvas (toggleable via OBS scene or broadcast panel)
+
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // LAYOUT 1: BGMI PRO SERIES IN-GAME RIGHT-SIDE HUD (DEFAULT)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (layout === 'hud') {
+    // Show top 16 teams (standard BGMI tournament lobby)
+    const hudScores = scores.slice(0, 16)
+
+    return (
+      <div className="obs-hud-canvas">
+        <aside className={`bgmi-hud-panel ${!showStatusBars ? 'bgmi-hud-panel--no-status' : ''}`} aria-label="Live In-Game Tournament Leaderboard">
+          {/* Header */}
+          <div className="bgmi-hud-header">
+            <span className="bgmi-hud-col-rank">#</span>
+            <span className="bgmi-hud-col-teams">TEAMS</span>
+            {showStatusBars && <span className="bgmi-hud-col-status">STATUS</span>}
+            <span className="bgmi-hud-col-fin">FIN</span>
+            <span className="bgmi-hud-col-pts">PTS</span>
+          </div>
+
+          {/* Team Rows */}
+          <div className="bgmi-hud-body">
+            {hudScores.length === 0 ? (
+              <div style={{ padding: '24px 12px', textAlign: 'center', color: '#94a3b8' }}>
+                <span style={{ display: 'block', color: '#f59e0b', fontWeight: 800, fontSize: '12px', letterSpacing: '1px' }}>
+                  MATCH {match.match_number}
+                </span>
+                <span style={{ display: 'block', fontSize: '11px', color: '#cbd5e1', marginTop: '4px' }}>
+                  Round {match.round} · Group {match.group_number}
+                </span>
+                <span style={{ display: 'block', fontSize: '10px', color: '#64748b', marginTop: '6px' }}>
+                  Awaiting Match Lobby...
+                </span>
+              </div>
+            ) : (
+              hudScores.map((row) => {
+                const isHighlighted = selectedTeamId === row.teamId
+                const isEliminated = (row.aliveCount ?? 0) === 0 && row.placement !== null
+
+                return (
+                <div
+                  key={row.teamId}
+                  className={`bgmi-hud-row ${
+                    isHighlighted ? 'bgmi-hud-row--highlight' : ''
+                  } ${isEliminated ? 'bgmi-hud-row--elim' : ''}`}
+                >
+                  {/* Rank */}
+                  <span className="bgmi-hud-rank">{row.rank}</span>
+
+                  {/* Team Logo + Tag */}
+                  <div className="bgmi-hud-team">
+                    {row.logoUrl ? (
+                      <Image
+                        src={row.logoUrl}
+                        alt={row.teamName}
+                        width={17}
+                        height={17}
+                        className="bgmi-hud-logo"
+                        unoptimized
+                      />
+                    ) : (
+                      <span className="bgmi-hud-tag-fallback">
+                        {row.teamTag ? row.teamTag.slice(0, 3) : 'KAB'}
+                      </span>
+                    )}
+                    <span className="bgmi-hud-tag" title={row.teamName}>
+                      {row.teamTag || row.teamName}
+                    </span>
+                  </div>
+
+                  {/* 4 Status Bars (Alive / Knocked / Eliminated) */}
+                  {showStatusBars && (
+                    <div className="bgmi-hud-status" title={`${row.aliveCount ?? 4} alive`}>
+                      {[0, 1, 2, 3].map((barIdx) => {
+                        const alive = row.aliveCount ?? 4
+                        const knocked = row.knockedCount ?? 0
+
+                        let statusClass = 'bgmi-hud-bar--elim'
+                        if (barIdx < alive) {
+                          statusClass = 'bgmi-hud-bar--alive'
+                        } else if (barIdx < alive + knocked) {
+                          statusClass = 'bgmi-hud-bar--knocked'
+                        }
+
+                        return (
+                          <span
+                            key={barIdx}
+                            className={`bgmi-hud-bar ${statusClass}`}
+                          />
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Finish Points (Kills) */}
+                  <span className="bgmi-hud-fin">{row.kills}</span>
+
+                  {/* Total Points */}
+                  <span className="bgmi-hud-pts">{row.totalPoints}</span>
+                </div>
+              )
+            }))}
+          </div>
+
+          {/* Footer Legend */}
+          {showStatusBars && (
+            <div className="bgmi-hud-footer">
+              <div className="bgmi-hud-legend-item">
+                <span className="bgmi-hud-legend-sq bgmi-hud-legend-sq--alive" />
+                <span>ALIVE</span>
+              </div>
+              <div className="bgmi-hud-legend-item">
+                <span className="bgmi-hud-legend-sq bgmi-hud-legend-sq--knocked" />
+                <span>KNOCKED</span>
+              </div>
+              <div className="bgmi-hud-legend-item">
+                <span className="bgmi-hud-legend-sq bgmi-hud-legend-sq--elim" />
+                <span>ELIMINATED</span>
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
+    )
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // LAYOUT 2: FULL-SCREEN POST-MATCH LEADERBOARD CARD (?layout=full)
+  // ══════════════════════════════════════════════════════════════════════════
   const isDualColumn = scores.length > 10
   const leftScores = isDualColumn ? scores.slice(0, Math.ceil(scores.length / 2)) : scores
   const rightScores = isDualColumn ? scores.slice(Math.ceil(scores.length / 2)) : []
@@ -79,7 +212,7 @@ export default function PointsOverlay({ initialMatchId }: Props) {
   return (
     <div className="obs-canvas">
       <div className="obs-points-card">
-        {/* ─── Top Brand & Tournament Bar ─────────────────────────────── */}
+        {/* Top Brand Bar */}
         <div className="obs-header-top">
           <div className="obs-brand-group">
             <div className="obs-kabuto-crest">
@@ -98,7 +231,7 @@ export default function PointsOverlay({ initialMatchId }: Props) {
           </div>
         </div>
 
-        {/* ─── Main Section Title Bar ─────────────────────────────────── */}
+        {/* Title Bar */}
         <div className="obs-header-main">
           <div className="obs-title-left">
             <div className="obs-accent-bar" />
@@ -111,9 +244,19 @@ export default function PointsOverlay({ initialMatchId }: Props) {
           </div>
         </div>
 
-        {/* ─── Points Table Grid ──────────────────────────────────────── */}
+        {/* Dual / Single Column Table */}
+        {scores.length === 0 ? (
+          <div style={{ padding: '60px 20px', textAlign: 'center', color: '#94a3b8' }}>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>🛡️</div>
+            <h2 style={{ fontSize: '20px', color: '#f8fafc', fontWeight: 700 }}>
+              ROUND {match.round} · GROUP {match.group_number} LOBBY
+            </h2>
+            <p style={{ color: '#64748b', marginTop: '8px', fontSize: '14px' }}>
+              Waiting for match scores to be recorded in Broadcast Control
+            </p>
+          </div>
+        ) : (
         <div className={`obs-tables-container ${isDualColumn ? 'obs-tables-container--dual' : ''}`}>
-          {/* Table (Left column or Full width) */}
           <div className="obs-table-column">
             <table className="obs-table">
               <thead>
@@ -127,13 +270,12 @@ export default function PointsOverlay({ initialMatchId }: Props) {
               </thead>
               <tbody>
                 {leftScores.map((row) => (
-                  <TableRowItem key={row.teamId} row={row} />
+                  <FullscreenTableRowItem key={row.teamId} row={row} />
                 ))}
               </tbody>
             </table>
           </div>
 
-          {/* Table (Right column for > 10 teams) */}
           {isDualColumn && (
             <div className="obs-table-column">
               <table className="obs-table">
@@ -148,15 +290,16 @@ export default function PointsOverlay({ initialMatchId }: Props) {
                 </thead>
                 <tbody>
                   {rightScores.map((row) => (
-                    <TableRowItem key={row.teamId} row={row} />
+                    <FullscreenTableRowItem key={row.teamId} row={row} />
                   ))}
                 </tbody>
               </table>
             </div>
           )}
         </div>
+        )}
 
-        {/* ─── Bottom Footer Accent Strip ─────────────────────────────── */}
+        {/* Footer */}
         <div className="obs-card-footer">
           <div className="obs-footer-left">
             <span className="obs-footer-accent-line" />
@@ -171,7 +314,7 @@ export default function PointsOverlay({ initialMatchId }: Props) {
   )
 }
 
-function TableRowItem({ row }: { row: OverlayScoreEntry }) {
+function FullscreenTableRowItem({ row }: { row: OverlayScoreEntry }) {
   const isRank1 = row.rank === 1
   const isRank2 = row.rank === 2
   const isRank3 = row.rank === 3
@@ -188,7 +331,6 @@ function TableRowItem({ row }: { row: OverlayScoreEntry }) {
           : ''
       }`}
     >
-      {/* RANK */}
       <td className="obs-td-rank">
         <div
           className={`obs-rank-pill ${
@@ -205,7 +347,6 @@ function TableRowItem({ row }: { row: OverlayScoreEntry }) {
         </div>
       </td>
 
-      {/* TEAM */}
       <td className="obs-td-team">
         <div className="obs-team-content">
           {row.logoUrl ? (
@@ -227,19 +368,16 @@ function TableRowItem({ row }: { row: OverlayScoreEntry }) {
         </div>
       </td>
 
-      {/* KILLS */}
       <td className="obs-td-kills">
         <span className="obs-num-val obs-num-val--kills">{row.kills}</span>
       </td>
 
-      {/* PLACEMENT */}
       <td className="obs-td-place">
         <span className="obs-num-val obs-num-val--place">
           {row.placement ? `#${row.placement}` : '—'}
         </span>
       </td>
 
-      {/* TOTAL */}
       <td className="obs-td-total">
         <div className={`obs-total-badge ${isRank1 ? 'obs-total-badge--gold' : ''}`}>
           <span className="obs-total-val">{row.totalPoints}</span>
