@@ -16,17 +16,32 @@ export interface ScorePayload {
   placement: number | null
   placementPoints: number
   totalPoints: number
+  alive?: number
+  knocked?: number
 }
 
 // ─── Default matches to seed if matches table is empty ───────────────────────
 
 const DEFAULT_SEED_MATCHES = [
-  { round: 1, group_number: 1, map: 'Erangel', match_number: 1, status: 'live' as MatchStatus },
-  { round: 1, group_number: 1, map: 'Miramar', match_number: 2, status: 'pending' as MatchStatus },
-  { round: 1, group_number: 1, map: 'Sanhok',  match_number: 3, status: 'pending' as MatchStatus },
-  { round: 2, group_number: 1, map: 'Erangel', match_number: 4, status: 'pending' as MatchStatus },
-  { round: 2, group_number: 2, map: 'Miramar', match_number: 5, status: 'pending' as MatchStatus },
-  { round: 3, group_number: 1, map: 'Erangel', match_number: 6, status: 'pending' as MatchStatus },
+  // Round 1 (Groups 1 to 8) — Maps: Miramar, Erangel, Rondo only
+  { round: 1, group_number: 1, map: 'Erangel', match_number: 1, status: 'live'    as MatchStatus },
+  { round: 1, group_number: 2, map: 'Miramar', match_number: 2, status: 'pending' as MatchStatus },
+  { round: 1, group_number: 3, map: 'Rondo',   match_number: 3, status: 'pending' as MatchStatus },
+  { round: 1, group_number: 4, map: 'Erangel', match_number: 4, status: 'pending' as MatchStatus },
+  { round: 1, group_number: 5, map: 'Miramar', match_number: 5, status: 'pending' as MatchStatus },
+  { round: 1, group_number: 6, map: 'Rondo',   match_number: 6, status: 'pending' as MatchStatus },
+  { round: 1, group_number: 7, map: 'Erangel', match_number: 7, status: 'pending' as MatchStatus },
+  { round: 1, group_number: 8, map: 'Miramar', match_number: 8, status: 'pending' as MatchStatus },
+  // Round 2
+  { round: 2, group_number: 1, map: 'Miramar', match_number: 9,  status: 'pending' as MatchStatus },
+  { round: 2, group_number: 2, map: 'Rondo',   match_number: 10, status: 'pending' as MatchStatus },
+  { round: 2, group_number: 3, map: 'Erangel', match_number: 11, status: 'pending' as MatchStatus },
+  { round: 2, group_number: 4, map: 'Miramar', match_number: 12, status: 'pending' as MatchStatus },
+  // Round 3
+  { round: 3, group_number: 1, map: 'Rondo',   match_number: 13, status: 'pending' as MatchStatus },
+  { round: 3, group_number: 2, map: 'Erangel', match_number: 14, status: 'pending' as MatchStatus },
+  { round: 3, group_number: 3, map: 'Miramar', match_number: 15, status: 'pending' as MatchStatus },
+  { round: 3, group_number: 4, map: 'Rondo',   match_number: 16, status: 'pending' as MatchStatus },
 ]
 
 declare global {
@@ -56,6 +71,30 @@ export async function getMatches(): Promise<ActionResult<MatchRow[]>> {
     }
 
     if (existingMatches && existingMatches.length > 0) {
+      // Ensure other tournament groups (Group 3, Group 4, etc.) are available in matches table
+      const existingGroups = new Set(existingMatches.map((m) => m.group_number))
+      const missingDefaults = DEFAULT_SEED_MATCHES.filter((m) => !existingGroups.has(m.group_number))
+
+      if (missingDefaults.length > 0) {
+        const maxMatchNumber = Math.max(...existingMatches.map((m) => m.match_number || 0), 0)
+        const toInsert = missingDefaults.map((m, idx) => ({
+          ...m,
+          match_number: maxMatchNumber + idx + 1,
+        }))
+
+        const { data: newlyInserted } = await supabase
+          .from('matches')
+          .insert(toInsert)
+          .select()
+
+        if (newlyInserted && newlyInserted.length > 0) {
+          const combined = [...existingMatches, ...newlyInserted].sort(
+            (a, b) => a.match_number - b.match_number
+          )
+          return { success: true, data: combined }
+        }
+      }
+
       return { success: true, data: existingMatches }
     }
 
@@ -76,11 +115,91 @@ export async function getMatches(): Promise<ActionResult<MatchRow[]>> {
   }
 }
 
+// ─── Get or create match on demand for any Round & Group ────────────────────
+
+export async function getOrCreateMatch(
+  round: number,
+  groupNumber: number,
+  map: string = 'Erangel'
+): Promise<ActionResult<MatchRow>> {
+  try {
+    const supabase = await createClient()
+
+    // 1. Check if match already exists for this round and group
+    const { data: existing } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('round', round)
+      .eq('group_number', groupNumber)
+      .order('match_number', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+
+    if (existing) {
+      return { success: true, data: existing }
+    }
+
+    // 2. Compute next match_number
+    const { data: allMatches } = await supabase
+      .from('matches')
+      .select('match_number')
+      .order('match_number', { ascending: false })
+      .limit(1)
+
+    const nextMatchNum = (allMatches && allMatches[0]?.match_number ? allMatches[0].match_number : 0) + 1
+
+    const newMatch = {
+      round,
+      group_number: groupNumber,
+      map,
+      match_number: nextMatchNum,
+      status: 'pending' as MatchStatus,
+    }
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from('matches')
+      .insert(newMatch)
+      .select()
+      .single()
+
+    if (insertErr || !inserted) {
+      const fallback: MatchRow = {
+        id: `match-r${round}-g${groupNumber}`,
+        round,
+        group_number: groupNumber,
+        map,
+        match_number: nextMatchNum,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      return { success: true, data: fallback }
+    }
+
+    revalidatePath('/broadcast')
+    revalidatePath('/overlay/points')
+    return { success: true, data: inserted }
+  } catch {
+    const fallback: MatchRow = {
+      id: `match-r${round}-g${groupNumber}`,
+      round,
+      group_number: groupNumber,
+      map,
+      match_number: round * 10 + groupNumber,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    return { success: true, data: fallback }
+  }
+}
+
 // ─── Fetch teams and their scores for a match ────────────────────────────────
 
 export interface MatchTeamsScoresData {
   teams: TeamRow[]
   scores: LiveScoreRow[]
+  teamStatus?: Record<string, { alive: number; knocked: number }>
 }
 
 export async function getMatchScores(matchId: string): Promise<ActionResult<MatchTeamsScoresData>> {
@@ -90,11 +209,12 @@ export async function getMatchScores(matchId: string): Promise<ActionResult<Matc
   try {
     const supabase = await createClient()
 
-    // 1. Fetch all teams
-    const { data: teams } = await supabase
-      .from('teams')
+    // 1. Fetch match to know its round & group
+    const { data: match } = await supabase
+      .from('matches')
       .select('*')
-      .order('name', { ascending: true })
+      .eq('id', matchId)
+      .maybeSingle()
 
     // 2. Fetch live scores for this match
     const { data: scores } = await supabase
@@ -103,24 +223,79 @@ export async function getMatchScores(matchId: string): Promise<ActionResult<Matc
       .eq('match_id', matchId)
 
     const finalScores = (scores && scores.length > 0) ? scores : cachedScores
+    const scoredTeamIds = new Set(finalScores.map((s) => s.team_id))
+
+    // 3. Fetch all teams
+    const { data: allTeams } = await supabase
+      .from('teams')
+      .select('*')
+      .order('name', { ascending: true })
+
+    const teamList = allTeams ?? []
+
+    // 4. Filter teams that belong to this match
+    // A team belongs to this match if:
+    // - It has a score entry in this match, OR
+    // - Its round & group_number match this match's round & group_number
+    let matchTeams: TeamRow[] = []
+
+    if (match) {
+      const { getTeamsWithRoundGroup } = await import('@/app/broadcast/actions/teams')
+      const decoratedRes = await getTeamsWithRoundGroup()
+      const decoratedTeams = decoratedRes.success ? decoratedRes.data : teamList
+
+      matchTeams = decoratedTeams.filter((t) => {
+        if (scoredTeamIds.has(t.id)) return true
+        const tRound = t.round ?? 1
+        const tGroup = t.group_number ?? 1
+        return tRound === match.round && tGroup === match.group_number
+      })
+
+      // If no teams specifically matched this round/group yet, but teams exist in DB and no groups were ever set,
+      // only include scored teams (never show demo teams)
+      if (matchTeams.length === 0 && scoredTeamIds.size > 0) {
+        matchTeams = decoratedTeams.filter((t) => scoredTeamIds.has(t.id))
+      }
+    } else {
+      matchTeams = teamList.filter((t) => scoredTeamIds.has(t.id))
+    }
+
+    // 5. Build squad status map (alive / knocked)
+    const teamStatus: Record<string, { alive: number; knocked: number }> = {}
+    for (const t of matchTeams) {
+      const cached = globalThis.__kabutoTeamAlive?.get(`${matchId}_${t.id}`)
+      if (cached) {
+        teamStatus[t.id] = cached
+      } else {
+        const score = finalScores.find((s) => s.team_id === t.id)
+        if (score && score.position !== null && score.position > 1) {
+          teamStatus[t.id] = { alive: 0, knocked: 0 }
+        } else {
+          teamStatus[t.id] = { alive: 4, knocked: 0 }
+        }
+      }
+    }
 
     return {
       success: true,
       data: {
-        teams: (teams && teams.length > 0) ? teams : DEMO_OVERLAY_TEAMS,
+        teams: matchTeams,
         scores: finalScores,
+        teamStatus,
       },
     }
-  } catch {
+  } catch (err: unknown) {
     return {
-      success: true,
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to fetch match scores.',
       data: {
-        teams: DEMO_OVERLAY_TEAMS,
-        scores: cachedScores,
+        teams: [],
+        scores: [],
       },
     }
   }
 }
+
 
 // ─── Save scores to live_scores ──────────────────────────────────────────────
 
@@ -145,6 +320,19 @@ export async function saveScores(
   // Update in-memory cache for instant fallback
   const cache = getLocalScoresCache()
   cache.set(matchId, upsertRows)
+
+  // Update in-memory squad alive status
+  if (!globalThis.__kabutoTeamAlive) {
+    globalThis.__kabutoTeamAlive = new Map()
+  }
+  for (const s of scores) {
+    if (s.alive !== undefined) {
+      globalThis.__kabutoTeamAlive.set(`${matchId}_${s.teamId}`, {
+        alive: Math.max(0, Math.min(4, s.alive)),
+        knocked: Math.max(0, Math.min(3, s.knocked ?? 0)),
+      })
+    }
+  }
 
   try {
     const supabase = await createClient()
@@ -205,23 +393,50 @@ export interface OverlayScoreEntry {
   placement: number | null
   totalPoints: number
   rank: number
+  aliveCount: number
+  knockedCount: number
 }
 
 export interface OverlayData {
   match: MatchRow
   scores: OverlayScoreEntry[]
+  selectedTeamId: string | null
+  showPoints: boolean
+  showStatusBars: boolean
 }
 
-const DEMO_OVERLAY_TEAMS: TeamRow[] = [
-  { id: 'demo-1', name: 'Soul Esports',     tag: 'SOUL',  logo_url: null, created_at: '', updated_at: '' },
-  { id: 'demo-2', name: 'Team XSpark',      tag: 'TX',    logo_url: null, created_at: '', updated_at: '' },
-  { id: 'demo-3', name: 'GodLike Esports',  tag: 'GODL',  logo_url: null, created_at: '', updated_at: '' },
-  { id: 'demo-4', name: 'Global Esports',   tag: 'GE',    logo_url: null, created_at: '', updated_at: '' },
-  { id: 'demo-5', name: 'OR Esports',       tag: 'OR',    logo_url: null, created_at: '', updated_at: '' },
-  { id: 'demo-6', name: 'Skylightz Gaming', tag: 'SKYLZ', logo_url: null, created_at: '', updated_at: '' },
-  { id: 'demo-7', name: '7Sea Esports',     tag: '7SEA',  logo_url: null, created_at: '', updated_at: '' },
-  { id: 'demo-8', name: 'Enigma Gaming',    tag: 'EG',    logo_url: null, created_at: '', updated_at: '' },
-]
+declare global {
+  var __kabutoTeamAlive: Map<string, { alive: number; knocked: number }> | undefined
+  var __kabutoShowStatusBars: boolean | undefined
+}
+
+export async function setTeamAliveStatus(
+  matchId: string,
+  teamId: string,
+  alive: number,
+  knocked: number = 0
+): Promise<ActionResult> {
+  if (!globalThis.__kabutoTeamAlive) {
+    globalThis.__kabutoTeamAlive = new Map()
+  }
+  globalThis.__kabutoTeamAlive.set(`${matchId}_${teamId}`, {
+    alive: Math.max(0, Math.min(4, alive)),
+    knocked: Math.max(0, Math.min(3, knocked)),
+  })
+  revalidatePath('/overlay/points')
+  revalidatePath('/broadcast')
+  return { success: true }
+}
+
+export async function toggleOverlayStatusBars(show: boolean): Promise<ActionResult> {
+  globalThis.__kabutoShowStatusBars = show
+  revalidatePath('/overlay/points')
+  revalidatePath('/broadcast')
+  return { success: true }
+}
+
+
+
 
 const DEMO_OVERLAY_MATCH: MatchRow = {
   id: 'demo-match-1',
@@ -303,15 +518,7 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
     // If still no match in DB, fallback to demo match
     const match = targetMatch ?? DEMO_OVERLAY_MATCH
 
-    // 2. Fetch teams
-    const { data: dbTeams } = await supabase
-      .from('teams')
-      .select('*')
-      .order('name', { ascending: true })
-
-    const teams = (dbTeams && dbTeams.length > 0) ? dbTeams : DEMO_OVERLAY_TEAMS
-
-    // 3. Fetch scores for this match
+    // 2. Fetch scores for this match
     const { data: dbScores } = await supabase
       .from('live_scores')
       .select('*')
@@ -325,12 +532,51 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
       dbScores.forEach((s) => scoresMap.set(s.team_id, s))
     }
 
+    // 3. Fetch teams decorated with round/group
+    const { getTeamsWithRoundGroup } = await import('@/app/broadcast/actions/teams')
+    const decoratedRes = await getTeamsWithRoundGroup()
+    const allTeams = decoratedRes.success ? decoratedRes.data : []
+
+    // Filter to teams for this match
+    const matchTeams = allTeams.filter((t) => {
+      if (scoresMap.has(t.id)) return true
+      const tRound = t.round ?? 1
+      const tGroup = t.group_number ?? 1
+      return tRound === match.round && tGroup === match.group_number
+    })
+
+    const teams = matchTeams.length > 0 ? matchTeams : (scoresMap.size > 0 ? allTeams.filter(t => scoresMap.has(t.id)) : [])
+
+    // Fetch broadcast_state
+    const { data: bState } = await supabase
+      .from('broadcast_state')
+      .select('selected_team_id, show_points')
+      .limit(1)
+      .maybeSingle()
+
+    const selectedTeamId = bState?.selected_team_id ?? (globalThis as unknown as { __kabutoBroadcastState?: { selected_team_id?: string | null } }).__kabutoBroadcastState?.selected_team_id ?? null
+    const showPoints = bState?.show_points ?? (globalThis as unknown as { __kabutoBroadcastState?: { show_points?: boolean } }).__kabutoBroadcastState?.show_points ?? true
+
     // 4. Combine and sort
     const entries: OverlayScoreEntry[] = teams.map((team) => {
       const score = scoresMap.get(team.id)
       const kills = score ? score.kills : 0
       const placement = score?.position ?? null
       const totalPoints = score ? score.points : 0
+
+      // Alive status calculation
+      const aliveOverride = globalThis.__kabutoTeamAlive?.get(`${match.id}_${team.id}`)
+      let aliveCount = 4
+      let knockedCount = 0
+
+      if (aliveOverride) {
+        aliveCount = aliveOverride.alive
+        knockedCount = aliveOverride.knocked
+      } else if (placement !== null) {
+        // Team has finished/eliminated
+        aliveCount = 0
+        knockedCount = 0
+      }
 
       return {
         teamId: team.id,
@@ -341,13 +587,21 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
         placement,
         totalPoints,
         rank: 0, // assigned after sorting
+        aliveCount,
+        knockedCount,
       }
     })
 
-    // Sort: Total Points (descending), then Kills (descending), then Team Name
+    // Sort: Total Points → Placement Points (higher = better placement) → Kills → Name
     entries.sort((a, b) => {
       if (b.totalPoints !== a.totalPoints) {
         return b.totalPoints - a.totalPoints
+      }
+      // Same total points: team with more placement points ranks higher
+      const aPlacePts = Math.max(0, a.totalPoints - a.kills)
+      const bPlacePts = Math.max(0, b.totalPoints - b.kills)
+      if (bPlacePts !== aPlacePts) {
+        return bPlacePts - aPlacePts
       }
       if (b.kills !== a.kills) {
         return b.kills - a.kills
@@ -365,6 +619,9 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
       data: {
         match,
         scores: entries,
+        selectedTeamId,
+        showPoints,
+        showStatusBars: globalThis.__kabutoShowStatusBars ?? true,
       },
     }
   } catch (err: unknown) {
@@ -374,16 +631,10 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
       error: msg,
       data: {
         match: DEMO_OVERLAY_MATCH,
-        scores: DEMO_OVERLAY_TEAMS.map((t, idx) => ({
-          teamId: t.id,
-          teamName: t.name,
-          teamTag: t.tag,
-          logoUrl: t.logo_url,
-          kills: 0,
-          placement: null,
-          totalPoints: 0,
-          rank: idx + 1,
-        })),
+        scores: [],
+        selectedTeamId: null,
+        showPoints: true,
+        showStatusBars: true,
       },
     }
   }
