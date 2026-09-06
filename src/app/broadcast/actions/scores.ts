@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import type { MatchRow, TeamRow, LiveScoreRow, MatchStatus } from '@/types/database'
-import { getTeamsWithRoundGroup } from '@/app/broadcast/actions/teams'
 
 export interface ActionResult<T = unknown> {
   success: boolean
@@ -241,8 +240,10 @@ export async function getMatchScores(matchId: string): Promise<ActionResult<Matc
     let matchTeams: TeamRow[] = []
 
     if (match) {
+      // Dynamic import avoids circular dependency: teams.ts also imports scores.ts
+      const { getTeamsWithRoundGroup } = await import('@/app/broadcast/actions/teams')
       const decoratedRes = await getTeamsWithRoundGroup()
-      const decoratedTeams: TeamRow[] = decoratedRes.success ? decoratedRes.data : teamList
+      const decoratedTeams: TeamRow[] = (decoratedRes.success ? decoratedRes.data : teamList) as TeamRow[]
 
       matchTeams = decoratedTeams.filter((t: TeamRow) => {
         if (scoredTeamIds.has(t.id)) return true
@@ -533,8 +534,10 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
     }
 
     // 3. Fetch teams decorated with round/group
+    // Dynamic import avoids circular dependency: teams.ts also imports scores.ts
+    const { getTeamsWithRoundGroup } = await import('@/app/broadcast/actions/teams')
     const decoratedRes = await getTeamsWithRoundGroup()
-    const allTeams: TeamRow[] = decoratedRes.success ? decoratedRes.data : []
+    const allTeams: TeamRow[] = (decoratedRes.success ? decoratedRes.data : []) as TeamRow[]
 
     // Filter to teams for this match
     const matchTeams = allTeams.filter((t: TeamRow) => {
