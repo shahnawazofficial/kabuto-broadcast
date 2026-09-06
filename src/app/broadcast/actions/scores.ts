@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import type { MatchRow, TeamRow, LiveScoreRow, MatchStatus } from '@/types/database'
+import { getTeamsWithRoundGroup } from '@/app/broadcast/actions/teams'
 
 export interface ActionResult<T = unknown> {
   success: boolean
@@ -240,11 +241,10 @@ export async function getMatchScores(matchId: string): Promise<ActionResult<Matc
     let matchTeams: TeamRow[] = []
 
     if (match) {
-      const { getTeamsWithRoundGroup } = await import('@/app/broadcast/actions/teams')
       const decoratedRes = await getTeamsWithRoundGroup()
-      const decoratedTeams = decoratedRes.success ? decoratedRes.data : teamList
+      const decoratedTeams: TeamRow[] = decoratedRes.success ? decoratedRes.data : teamList
 
-      matchTeams = decoratedTeams.filter((t) => {
+      matchTeams = decoratedTeams.filter((t: TeamRow) => {
         if (scoredTeamIds.has(t.id)) return true
         const tRound = t.round ?? 1
         const tGroup = t.group_number ?? 1
@@ -254,10 +254,10 @@ export async function getMatchScores(matchId: string): Promise<ActionResult<Matc
       // If no teams specifically matched this round/group yet, but teams exist in DB and no groups were ever set,
       // only include scored teams (never show demo teams)
       if (matchTeams.length === 0 && scoredTeamIds.size > 0) {
-        matchTeams = decoratedTeams.filter((t) => scoredTeamIds.has(t.id))
+        matchTeams = decoratedTeams.filter((t: TeamRow) => scoredTeamIds.has(t.id))
       }
     } else {
-      matchTeams = teamList.filter((t) => scoredTeamIds.has(t.id))
+      matchTeams = teamList.filter((t: TeamRow) => scoredTeamIds.has(t.id))
     }
 
     // 5. Build squad status map (alive / knocked)
@@ -533,19 +533,20 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
     }
 
     // 3. Fetch teams decorated with round/group
-    const { getTeamsWithRoundGroup } = await import('@/app/broadcast/actions/teams')
     const decoratedRes = await getTeamsWithRoundGroup()
-    const allTeams = decoratedRes.success ? decoratedRes.data : []
+    const allTeams: TeamRow[] = decoratedRes.success ? decoratedRes.data : []
 
     // Filter to teams for this match
-    const matchTeams = allTeams.filter((t) => {
+    const matchTeams = allTeams.filter((t: TeamRow) => {
       if (scoresMap.has(t.id)) return true
       const tRound = t.round ?? 1
       const tGroup = t.group_number ?? 1
       return tRound === match.round && tGroup === match.group_number
     })
 
-    const teams = matchTeams.length > 0 ? matchTeams : (scoresMap.size > 0 ? allTeams.filter(t => scoresMap.has(t.id)) : [])
+    const teams = matchTeams.length > 0
+      ? matchTeams
+      : (scoresMap.size > 0 ? allTeams.filter((t: TeamRow) => scoresMap.has(t.id)) : [])
 
     // Fetch broadcast_state
     const { data: bState } = await supabase
