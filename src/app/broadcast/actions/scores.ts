@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import type { MatchRow, TeamRow, LiveScoreRow, MatchStatus } from '@/types/database'
+import { fetchTeamsWithRoundGroup } from '@/app/broadcast/actions/teams-query'
 
 export interface ActionResult<T = unknown> {
   success: boolean
@@ -240,10 +241,7 @@ export async function getMatchScores(matchId: string): Promise<ActionResult<Matc
     let matchTeams: TeamRow[] = []
 
     if (match) {
-      // Dynamic import avoids circular dependency: teams.ts also imports scores.ts
-      const { getTeamsWithRoundGroup } = await import('@/app/broadcast/actions/teams')
-      const decoratedRes = await getTeamsWithRoundGroup()
-      const decoratedTeams: TeamRow[] = (decoratedRes.success ? decoratedRes.data : teamList) as TeamRow[]
+      const decoratedTeams: TeamRow[] = await fetchTeamsWithRoundGroup()
 
       matchTeams = decoratedTeams.filter((t: TeamRow) => {
         if (scoredTeamIds.has(t.id)) return true
@@ -533,21 +531,18 @@ export async function getLiveOverlayData(requestedMatchId?: string): Promise<Act
       dbScores.forEach((s) => scoresMap.set(s.team_id, s))
     }
 
-    // 3. Fetch teams decorated with round/group
-    // Dynamic import avoids circular dependency: teams.ts also imports scores.ts
-    const { getTeamsWithRoundGroup } = await import('@/app/broadcast/actions/teams')
-    const decoratedRes = await getTeamsWithRoundGroup()
-    const allTeams: TeamRow[] = (decoratedRes.success ? decoratedRes.data : []) as TeamRow[]
+    // 3. Fetch teams decorated with round/group (via shared helper — no circular dep)
+    const allTeams: TeamRow[] = await fetchTeamsWithRoundGroup()
 
     // Filter to teams for this match
-    const matchTeams = allTeams.filter((t: TeamRow) => {
+    const matchTeams: TeamRow[] = allTeams.filter((t: TeamRow) => {
       if (scoresMap.has(t.id)) return true
       const tRound = t.round ?? 1
       const tGroup = t.group_number ?? 1
       return tRound === match.round && tGroup === match.group_number
     })
 
-    const teams = matchTeams.length > 0
+    const teams: TeamRow[] = matchTeams.length > 0
       ? matchTeams
       : (scoresMap.size > 0 ? allTeams.filter((t: TeamRow) => scoresMap.has(t.id)) : [])
 
