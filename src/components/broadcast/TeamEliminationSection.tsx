@@ -9,6 +9,7 @@ import {
   hideTeamEliminated,
   getTeamsAndPlayers,
 } from '@/app/broadcast/actions/broadcast'
+import { notifyRealtimeChange } from '@/lib/supabase/realtime'
 import { OverlayKey } from '@/types/broadcast'
 
 const FALLBACK_TEAMS: TeamRow[] = [
@@ -107,6 +108,11 @@ export default function TeamEliminationSection({ onActivate }: Props) {
       const res = await triggerTeamEliminated(selectedTeamId, kills)
       if (res.success) {
         startLocalCountdown()
+        notifyRealtimeChange('broadcast_state', 'UPDATE', {
+          show_elimination: true,
+          elimination_team_id: selectedTeamId,
+          elimination_kills: kills,
+        })
         if (onActivate) onActivate('eliminationGraphic')
         setFeedback('Team Eliminated broadcasted! (Auto-hides after 5s)')
         setTimeout(() => setFeedback(null), 4000)
@@ -125,6 +131,7 @@ export default function TeamEliminationSection({ onActivate }: Props) {
       setIsActive(false)
       setCountdown(0)
       await hideTeamEliminated()
+      notifyRealtimeChange('broadcast_state', 'UPDATE', { show_elimination: false })
       setFeedback('Elimination graphic hidden.')
       setTimeout(() => setFeedback(null), 3000)
     })

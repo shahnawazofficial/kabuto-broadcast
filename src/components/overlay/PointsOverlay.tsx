@@ -28,6 +28,8 @@ const DEFAULT_SCORES: OverlayScoreEntry[] = [
   { teamId: 't8', teamName: 'Enigma Gaming',    teamTag: 'EG',    logoUrl: null, kills: 2,  placement: 8, totalPoints: 3,  rank: 8 },
 ]
 
+import { subscribeToRealtimeTables } from '@/lib/supabase/realtime'
+
 interface Props {
   initialMatchId?: string
 }
@@ -49,15 +51,25 @@ export default function PointsOverlay({ initialMatchId }: Props) {
         }
       }
     } catch {
-      // Quiet fail on polling error to keep OBS stream running smoothly
+      // Quiet fail on network error to keep OBS stream running smoothly
     }
   }, [initialMatchId])
 
-  // Initial fetch + interval polling (every 2.5s)
+  // Supabase Realtime subscription — updates immediately on live_scores, matches, or broadcast_state changes
   useEffect(() => {
     fetchData()
-    const interval = setInterval(fetchData, 2500)
-    return () => clearInterval(interval)
+
+    const unsubscribe = subscribeToRealtimeTables({
+      channelName: 'obs-overlay-points-realtime',
+      tables: ['live_scores', 'matches', 'broadcast_state', 'teams'],
+      onChange: () => {
+        fetchData()
+      },
+    })
+
+    return () => {
+      unsubscribe()
+    }
   }, [fetchData])
 
   const isDualColumn = scores.length > 10

@@ -54,6 +54,8 @@ declare global {
     elimination_team_id: string | null
     elimination_kills: number
     eliminated_at: number | null
+    show_points: boolean
+    current_match_id: string | null
   } | undefined
 }
 
@@ -67,6 +69,8 @@ function getLocalBroadcastState() {
       elimination_team_id: 'team-godl',
       elimination_kills: 0,
       eliminated_at: null,
+      show_points: true,
+      current_match_id: 'match-1',
     }
   }
   return globalThis.__kabutoBroadcastState
@@ -93,6 +97,8 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
       local.show_elimination = data.show_elimination
       local.elimination_team_id = data.elimination_team_id
       local.elimination_kills = data.elimination_kills
+      if (typeof data.show_points === 'boolean') local.show_points = data.show_points
+      if (data.current_match_id) local.current_match_id = data.current_match_id
       return { success: true, data }
     }
 
@@ -100,7 +106,7 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
     const { data: inserted } = await supabase
       .from('broadcast_state')
       .insert({
-        show_points: false,
+        show_points: local.show_points,
         show_player: local.show_player,
         selected_team_id: local.selected_team_id,
         selected_player_id: local.selected_player_id,
@@ -108,6 +114,7 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
         show_match: false,
         elimination_team_id: local.elimination_team_id,
         elimination_kills: local.elimination_kills,
+        current_match_id: local.current_match_id,
       })
       .select()
       .maybeSingle()
@@ -124,10 +131,10 @@ export async function getBroadcastState(): Promise<ActionResult<BroadcastStateRo
     success: true,
     data: {
       id: 'local-singleton',
-      current_match_id: null,
+      current_match_id: local.current_match_id,
       selected_player_id: local.selected_player_id,
       selected_team_id: local.selected_team_id,
-      show_points: false,
+      show_points: local.show_points,
       show_player: local.show_player,
       show_elimination: local.show_elimination,
       show_match: false,
@@ -459,4 +466,87 @@ export async function getLiveEliminationOverlayData(): Promise<ActionResult<Elim
     },
   }
 }
+
+// ─── Match and Overlay Toggle Server Actions ────────────────────────────────
+
+export async function setCurrentBroadcastMatch(matchId: string): Promise<ActionResult> {
+  const local = getLocalBroadcastState()
+  local.current_match_id = matchId
+
+  try {
+    const supabase = await createClient()
+    const { data: existing } = await supabase
+      .from('broadcast_state')
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+
+    if (existing) {
+      await supabase
+        .from('broadcast_state')
+        .update({
+          current_match_id: matchId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+    }
+  } catch {
+    // Supabase optional in local dev
+  }
+
+  revalidatePath('/broadcast')
+  revalidatePath('/overlay/points')
+  return { success: true }
+}
+
+export async function toggleBroadcastOverlay(
+  key: 'pointsTable' | 'playerGraphic' | 'eliminationGraphic' | 'matchGraphic',
+  enabled: boolean
+): Promise<ActionResult> {
+  const local = getLocalBroadcastState()
+
+  const fieldMap: Record<string, keyof typeof local> = {
+    pointsTable: 'show_points',
+    playerGraphic: 'show_player',
+    eliminationGraphic: 'show_elimination',
+  }
+
+  const field = fieldMap[key]
+  if (field && typeof local[field] === 'boolean') {
+    ;(local as Record<string, unknown>)[field] = enabled
+  }
+
+  try {
+    const supabase = await createClient()
+    const { data: existing } = await supabase
+      .from('broadcast_state')
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+
+    if (existing) {
+      const updatePayload: Partial<BroadcastStateRow> = {
+        updated_at: new Date().toISOString(),
+      }
+      if (key === 'pointsTable') updatePayload.show_points = enabled
+      if (key === 'playerGraphic') updatePayload.show_player = enabled
+      if (key === 'eliminationGraphic') updatePayload.show_elimination = enabled
+      if (key === 'matchGraphic') updatePayload.show_match = enabled
+
+      await supabase
+        .from('broadcast_state')
+        .update(updatePayload)
+        .eq('id', existing.id)
+    }
+  } catch {
+    // Supabase optional in local dev
+  }
+
+  revalidatePath('/broadcast')
+  revalidatePath('/overlay/points')
+  revalidatePath('/overlay/player')
+  revalidatePath('/overlay/elimination')
+  return { success: true }
+}
+
 

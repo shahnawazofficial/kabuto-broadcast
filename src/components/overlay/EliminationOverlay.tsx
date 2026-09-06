@@ -7,6 +7,8 @@ import {
   getLiveEliminationOverlayData,
   hideTeamEliminated,
 } from '@/app/broadcast/actions/broadcast'
+import { subscribeToRealtimeTables } from '@/lib/supabase/realtime'
+
 
 type AnimationPhase = 'entering' | 'visible' | 'exiting' | 'hidden'
 
@@ -92,12 +94,20 @@ export default function EliminationOverlay() {
     }
   }, [animationPhase])
 
-  // Polling every 1000ms for rapid response to operator triggers
+  // Supabase Realtime subscription — triggers immediately on broadcast_state change
   useEffect(() => {
     fetchOverlayData()
-    const interval = setInterval(fetchOverlayData, 1000)
+
+    const unsubscribe = subscribeToRealtimeTables({
+      channelName: 'obs-overlay-elimination-realtime',
+      tables: ['broadcast_state', 'teams'],
+      onChange: () => {
+        fetchOverlayData()
+      },
+    })
+
     return () => {
-      clearInterval(interval)
+      unsubscribe()
       clearAllTimers()
     }
   }, [fetchOverlayData])

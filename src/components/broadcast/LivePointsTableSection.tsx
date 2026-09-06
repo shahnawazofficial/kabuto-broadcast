@@ -10,6 +10,8 @@ import {
   resetScores,
   ScorePayload,
 } from '@/app/broadcast/actions/scores'
+import { setCurrentBroadcastMatch } from '@/app/broadcast/actions/broadcast'
+import { notifyRealtimeChange } from '@/lib/supabase/realtime'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
 // ─── Standard BGMI 10-Point System ───────────────────────────────────────────
@@ -282,6 +284,7 @@ export default function LivePointsTableSection({ className = '' }: Props) {
 
       const res = await saveScores(selectedMatchId, payload)
       if (res.success) {
+        notifyRealtimeChange('live_scores', 'UPDATE', { matchId: selectedMatchId })
         setStatusMessage({ type: 'success', text: 'Scores saved successfully to Supabase!' })
       } else {
         setStatusMessage({ type: 'error', text: res.error ?? 'Failed to save scores.' })
@@ -313,11 +316,20 @@ export default function LivePointsTableSection({ className = '' }: Props) {
           })
           return reset
         })
+        notifyRealtimeChange('live_scores', 'DELETE', { matchId: selectedMatchId })
         setStatusMessage({ type: 'success', text: 'Scores have been reset for this match.' })
       } else {
         setStatusMessage({ type: 'error', text: res.error ?? 'Failed to reset scores.' })
       }
     })
+  }
+
+  // ─── 8. Handle match quick change ──────────────────────────────────────────
+  const handleMatchChange = (matchId: string) => {
+    setSelectedMatchId(matchId)
+    setCurrentBroadcastMatch(matchId).catch(() => {})
+    notifyRealtimeChange('matches', 'UPDATE', { matchId })
+    notifyRealtimeChange('broadcast_state', 'UPDATE', { current_match_id: matchId })
   }
 
   // Lobby statistics
@@ -423,7 +435,7 @@ export default function LivePointsTableSection({ className = '' }: Props) {
             id="select-scoring-match"
             className="select points-select points-select--featured"
             value={selectedMatchId}
-            onChange={(e) => setSelectedMatchId(e.target.value)}
+            onChange={(e) => handleMatchChange(e.target.value)}
             disabled={matchesLoading}
           >
             {matches.map((m) => (

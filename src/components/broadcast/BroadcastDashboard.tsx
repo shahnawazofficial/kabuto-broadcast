@@ -9,6 +9,9 @@ import TeamEliminationSection from '@/components/broadcast/TeamEliminationSectio
 import OverlayStatusSection from '@/components/broadcast/OverlayStatusSection'
 import LivePointsTableSection from '@/components/broadcast/LivePointsTableSection'
 
+import { toggleBroadcastOverlay } from '@/app/broadcast/actions/broadcast'
+import { notifyRealtimeChange } from '@/lib/supabase/realtime'
+
 const DEFAULT_MATCH: MatchInfo = {
   round: 'Round 1',
   group: 'Group 1',
@@ -33,18 +36,32 @@ export default function BroadcastDashboard({ embedded = false }: Props) {
   const [overlays, setOverlays] = useState<OverlayState>(DEFAULT_OVERLAYS)
 
   const toggleOverlay = useCallback((key: OverlayKey) => {
-    setOverlays((prev) => ({ ...prev, [key]: !prev[key] }))
+    setOverlays((prev) => {
+      const nextVal = !prev[key]
+      toggleBroadcastOverlay(key, nextVal).catch(() => {})
+      notifyRealtimeChange('broadcast_state', 'UPDATE', { key, enabled: nextVal })
+      return { ...prev, [key]: nextVal }
+    })
   }, [])
 
   const activateOverlay = useCallback((key: OverlayKey) => {
-    setOverlays((prev) => ({ ...prev, [key]: true }))
+    setOverlays((prev) => {
+      toggleBroadcastOverlay(key, true).catch(() => {})
+      notifyRealtimeChange('broadcast_state', 'UPDATE', { key, enabled: true })
+      return { ...prev, [key]: true }
+    })
+  }, [])
+
+  const handleMatchChange = useCallback((info: MatchInfo) => {
+    setMatchInfo(info)
+    notifyRealtimeChange('matches', 'UPDATE', info)
   }, [])
 
   const inner = (
     <>
       {/* Top row: Current Match + Overlay Status */}
       <div className="dashboard-row dashboard-row--top">
-        <CurrentMatchSection info={matchInfo} onChange={setMatchInfo} />
+        <CurrentMatchSection info={matchInfo} onChange={handleMatchChange} />
         <OverlayStatusSection overlays={overlays} />
       </div>
 

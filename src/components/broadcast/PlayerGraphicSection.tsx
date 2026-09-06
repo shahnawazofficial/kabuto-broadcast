@@ -9,6 +9,7 @@ import {
   setPlayerGraphicState,
   getTeamsAndPlayers,
 } from '@/app/broadcast/actions/broadcast'
+import { notifyRealtimeChange } from '@/lib/supabase/realtime'
 import { OverlayKey } from '@/types/broadcast'
 
 // Fallback demo teams and players if database is empty
@@ -108,10 +109,29 @@ export default function PlayerGraphicSection({ onActivate }: Props) {
   const handleTeamChange = (newTeamId: string) => {
     setSelectedTeamId(newTeamId)
     const newTeamPlayers = allPlayers.filter((p) => p.team_id === newTeamId)
-    if (newTeamPlayers.length > 0) {
-      setSelectedPlayerId(newTeamPlayers[0].id)
-    } else {
-      setSelectedPlayerId('')
+    const newPlayerId = newTeamPlayers.length > 0 ? newTeamPlayers[0].id : ''
+    setSelectedPlayerId(newPlayerId)
+
+    if (isGraphicActive && newPlayerId) {
+      setPlayerGraphicState(newTeamId, newPlayerId, true).catch(() => {})
+      notifyRealtimeChange('broadcast_state', 'UPDATE', {
+        show_player: true,
+        selected_player_id: newPlayerId,
+        selected_team_id: newTeamId,
+      })
+    }
+  }
+
+  // Handle player change
+  const handlePlayerChange = (newPlayerId: string) => {
+    setSelectedPlayerId(newPlayerId)
+    if (isGraphicActive && newPlayerId) {
+      setPlayerGraphicState(selectedTeamId, newPlayerId, true).catch(() => {})
+      notifyRealtimeChange('broadcast_state', 'UPDATE', {
+        show_player: true,
+        selected_player_id: newPlayerId,
+        selected_team_id: selectedTeamId,
+      })
     }
   }
 
@@ -123,6 +143,11 @@ export default function PlayerGraphicSection({ onActivate }: Props) {
       const res = await setPlayerGraphicState(selectedTeamId, selectedPlayerId, true)
       if (res.success) {
         setIsGraphicActive(true)
+        notifyRealtimeChange('broadcast_state', 'UPDATE', {
+          show_player: true,
+          selected_player_id: selectedPlayerId,
+          selected_team_id: selectedTeamId,
+        })
         setFeedback('Player graphic is now LIVE on /overlay/player')
         onActivate?.('playerGraphic')
       } else {
@@ -138,6 +163,7 @@ export default function PlayerGraphicSection({ onActivate }: Props) {
       const res = await setPlayerGraphicState(selectedTeamId, selectedPlayerId, false)
       if (res.success) {
         setIsGraphicActive(false)
+        notifyRealtimeChange('broadcast_state', 'UPDATE', { show_player: false })
         setFeedback('Player graphic is HIDDEN from overlay')
       } else {
         setFeedback(res.error ?? 'Failed to hide player graphic.')
@@ -185,7 +211,7 @@ export default function PlayerGraphicSection({ onActivate }: Props) {
             id="pg-player"
             className="field-select"
             value={selectedPlayerId}
-            onChange={(e) => setSelectedPlayerId(e.target.value)}
+            onChange={(e) => handlePlayerChange(e.target.value)}
             disabled={loading || isPending || availablePlayers.length === 0}
           >
             {availablePlayers.length === 0 ? (

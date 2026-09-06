@@ -169,6 +169,16 @@ create policy "Anon write: broadcast_state"
 insert into broadcast_state (
   show_points, show_player, show_elimination, show_match, elimination_kills
 ) values (
-  false, false, false, false, 0
+  true, false, false, false, 0
 )
 on conflict do nothing;
+
+-- ─── Supabase Realtime Configuration ──────────────────────────────────────────
+-- Enable PostgreSQL logical replication for the tables that power live broadcast graphics.
+-- Required for Supabase Realtime 'postgres_changes' subscriptions in overlays.
+alter publication supabase_realtime add table broadcast_state;
+alter publication supabase_realtime add table live_scores;
+alter publication supabase_realtime add table matches;
+alter publication supabase_realtime add table teams;
+alter publication supabase_realtime add table players;
+

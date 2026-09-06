@@ -5,6 +5,8 @@ import Image from 'next/image'
 import type { PlayerRow, TeamRow } from '@/types/database'
 import { getLivePlayerOverlayData } from '@/app/broadcast/actions/broadcast'
 
+import { subscribeToRealtimeTables } from '@/lib/supabase/realtime'
+
 export default function PlayerOverlay() {
   const [showPlayer, setShowPlayer] = useState<boolean>(false)
   const [player, setPlayer] = useState<PlayerRow | null>(null)
@@ -20,15 +22,25 @@ export default function PlayerOverlay() {
         if (res.data.team) setTeam(res.data.team)
       }
     } catch {
-      // Quiet fail on polling error to keep OBS stream smooth
+      // Quiet fail on network error to keep OBS stream smooth
     }
   }, [])
 
-  // Poll every 1.5s for live operator changes
+  // Supabase Realtime subscription — updates immediately when broadcast_state changes
   useEffect(() => {
     fetchOverlayData()
-    const interval = setInterval(fetchOverlayData, 1500)
-    return () => clearInterval(interval)
+
+    const unsubscribe = subscribeToRealtimeTables({
+      channelName: 'obs-overlay-player-realtime',
+      tables: ['broadcast_state', 'players', 'teams'],
+      onChange: () => {
+        fetchOverlayData()
+      },
+    })
+
+    return () => {
+      unsubscribe()
+    }
   }, [fetchOverlayData])
 
   // If not visible, return completely transparent canvas
