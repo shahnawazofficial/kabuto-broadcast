@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useMemo, useTransition } from 'react'
 import { createTeam, updateTeam } from '@/app/broadcast/actions/teams'
 import { TeamRow } from '@/types/database'
 import Modal from '@/components/ui/Modal'
@@ -16,6 +16,17 @@ export default function TeamFormModal({ team, isOpen, onClose, onSuccess }: Prop
   const isEdit = !!team
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const [groupValue, setGroupValue] = useState<number>(team?.group_number ?? 1)
+  const [isCustomGroup, setIsCustomGroup] = useState<boolean>((team?.group_number ?? 1) > 8)
+
+  const groupOptions = useMemo(() => {
+    const list = [1, 2, 3, 4, 5, 6, 7, 8]
+    if (team?.group_number && !list.includes(team.group_number)) {
+      list.push(team.group_number)
+      list.sort((a, b) => a - b)
+    }
+    return list
+  }, [team])
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -98,22 +109,58 @@ export default function TeamFormModal({ team, isOpen, onClose, onSuccess }: Prop
           </div>
 
           <div className="form-field">
-            <label className="field-label" htmlFor="team-group">Group</label>
-            <select
-              id="team-group"
-              name="group_number"
-              className="field-select"
-              defaultValue={team?.group_number ?? 1}
-            >
-              <option value={1}>Group 1</option>
-              <option value={2}>Group 2</option>
-              <option value={3}>Group 3</option>
-              <option value={4}>Group 4</option>
-              <option value={5}>Group 5</option>
-              <option value={6}>Group 6</option>
-              <option value={7}>Group 7</option>
-              <option value={8}>Group 8</option>
-            </select>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label className="field-label" htmlFor="team-group">
+                Group {isCustomGroup ? '(Custom)' : ''}
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsCustomGroup((prev) => !prev)}
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--clr-accent)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                {isCustomGroup ? '← List' : '+ Custom #'}
+              </button>
+            </div>
+
+            {!isCustomGroup ? (
+              <select
+                id="team-group"
+                name="group_number"
+                className="field-select"
+                value={groupValue}
+                onChange={(e) => {
+                  if (e.target.value === 'custom') {
+                    setIsCustomGroup(true)
+                  } else {
+                    setGroupValue(parseInt(e.target.value, 10))
+                  }
+                }}
+              >
+                {groupOptions.map((g) => (
+                  <option key={g} value={g}>Group {g}</option>
+                ))}
+                <option value="custom">+ Other / Custom Group...</option>
+              </select>
+            ) : (
+              <input
+                id="team-group-custom"
+                name="group_number"
+                type="number"
+                min="1"
+                className="field-input"
+                value={groupValue}
+                onChange={(e) => setGroupValue(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                placeholder="Enter Group Number (e.g. 9, 10...)"
+                autoFocus
+              />
+            )}
           </div>
         </div>
 

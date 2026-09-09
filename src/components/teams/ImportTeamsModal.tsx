@@ -87,6 +87,7 @@ export default function ImportTeamsModal({ isOpen, onClose, onSuccess }: Props) 
   const [pastedText, setPastedText] = useState('')
   const [selectedRound, setSelectedRound] = useState<number>(1)
   const [selectedGroup, setSelectedGroup] = useState<number>(1)
+  const [isCustomGroup, setIsCustomGroup] = useState<boolean>(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -319,24 +320,59 @@ export default function ImportTeamsModal({ isOpen, onClose, onSuccess }: Props) 
           </div>
 
           <div className="form-field">
-            <label className="field-label" htmlFor="import-group">
-              Assign to Group *
-            </label>
-            <select
-              id="import-group"
-              className="field-select"
-              value={selectedGroup}
-              onChange={(e) => setSelectedGroup(parseInt(e.target.value, 10))}
-            >
-              <option value={1}>Group 1</option>
-              <option value={2}>Group 2</option>
-              <option value={3}>Group 3</option>
-              <option value={4}>Group 4</option>
-              <option value={5}>Group 5</option>
-              <option value={6}>Group 6</option>
-              <option value={7}>Group 7</option>
-              <option value={8}>Group 8</option>
-            </select>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label className="field-label" htmlFor="import-group">
+                Assign to Group * {isCustomGroup ? '(Custom)' : ''}
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsCustomGroup((prev) => !prev)}
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--clr-accent)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                {isCustomGroup ? '← List' : '+ Custom #'}
+              </button>
+            </div>
+
+            {!isCustomGroup ? (
+              <select
+                id="import-group"
+                className="field-select"
+                value={selectedGroup}
+                onChange={(e) => {
+                  if (e.target.value === 'custom') {
+                    setIsCustomGroup(true)
+                  } else {
+                    setSelectedGroup(parseInt(e.target.value, 10))
+                  }
+                }}
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((g) => (
+                  <option key={g} value={g}>Group {g}</option>
+                ))}
+                {selectedGroup > 8 && (
+                  <option value={selectedGroup}>Group {selectedGroup}</option>
+                )}
+                <option value="custom">+ Other / Custom Group...</option>
+              </select>
+            ) : (
+              <input
+                id="import-group-custom"
+                type="number"
+                min="1"
+                className="field-input"
+                value={selectedGroup}
+                onChange={(e) => setSelectedGroup(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                placeholder="Enter Group Number (e.g. 9, 10...)"
+                autoFocus
+              />
+            )}
           </div>
         </div>
 

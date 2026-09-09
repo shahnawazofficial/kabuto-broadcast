@@ -65,7 +65,7 @@ export async function fetchTeamsWithRoundGroup(): Promise<TeamRow[]> {
 
       // Determine accurate group: DB score links > in-memory map > explicit row fields > creation batch
       let assignedGroup = dbMeta?.group_number ?? inMem?.groupNumber ?? rawGroup
-      let assignedRound = dbMeta?.round ?? inMem?.round ?? rawRound ?? 1
+      const assignedRound = dbMeta?.round ?? inMem?.round ?? rawRound ?? 1
 
       if (!assignedGroup) {
         const createdAt = typeof raw['created_at'] === 'string' ? raw['created_at'] : ''

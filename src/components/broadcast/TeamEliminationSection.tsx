@@ -9,7 +9,7 @@ import {
   hideTeamEliminated,
   getTeamsAndPlayers,
 } from '@/app/broadcast/actions/broadcast'
-import { notifyRealtimeChange } from '@/lib/supabase/realtime'
+import { notifyRealtimeChange, subscribeToRealtimeTables } from '@/lib/supabase/realtime'
 import { OverlayKey } from '@/types/broadcast'
 
 const FALLBACK_TEAMS: TeamRow[] = [
@@ -69,21 +69,8 @@ export default function TeamEliminationSection({ onActivate }: Props) {
     }
   }, [])
 
-  useEffect(() => {
-    loadData()
-  }, [loadData])
-
-  // Clear countdown timer on unmount
-  useEffect(() => {
-    return () => {
-      if (countdownTimerRef.current) {
-        clearInterval(countdownTimerRef.current)
-      }
-    }
-  }, [])
-
   // Start 5s countdown timer in operator UI
-  const startLocalCountdown = () => {
+  const startLocalCountdown = useCallback(() => {
     if (countdownTimerRef.current) {
       clearInterval(countdownTimerRef.current)
     }
@@ -100,7 +87,43 @@ export default function TeamEliminationSection({ onActivate }: Props) {
         return prev - 1
       })
     }, 1000)
-  }
+  }, [])
+
+  useEffect(() => {
+    loadData()
+
+    const unsubscribe = subscribeToRealtimeTables({
+      channelName: 'team-elimination-panel-sync',
+      tables: ['broadcast_state'],
+      onChange: (payload) => {
+        const row = payload?.record as Record<string, unknown> | undefined
+        if (row) {
+          if (row.elimination_team_id) {
+            setSelectedTeamId(String(row.elimination_team_id))
+          }
+          if (typeof row.elimination_kills === 'number') {
+            setKills(Number(row.elimination_kills))
+          }
+          if (row.show_elimination) {
+            startLocalCountdown()
+          } else if (row.show_elimination === false) {
+            setIsActive(false)
+            setCountdown(0)
+            if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
+          }
+        } else {
+          loadData()
+        }
+      },
+    })
+
+    return () => {
+      unsubscribe()
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current)
+      }
+    }
+  }, [loadData, startLocalCountdown])
 
   // Handle "TEAM ELIMINATED" trigger
   const handleTriggerElimination = () => {

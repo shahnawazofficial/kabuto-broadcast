@@ -6,6 +6,22 @@ import { deleteTeam, deleteTeamsBatch, getTeamsWithRoundGroup, assignTeamsToGrou
 import TeamFormModal from './TeamFormModal'
 import ImportTeamsModal, { ImportSuccessInfo } from './ImportTeamsModal'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import Modal from '@/components/ui/Modal'
+
+export function getGroupBadgeStyle(groupNumber: number) {
+  const palettes = [
+    { border: 'rgba(245, 158, 11, 0.4)', bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24' },  // Gold
+    { border: 'rgba(56, 189, 248, 0.4)', bg: 'rgba(56, 189, 248, 0.15)', text: '#38bdf8' },  // Sky
+    { border: 'rgba(52, 211, 153, 0.4)', bg: 'rgba(52, 211, 153, 0.15)', text: '#34d399' },  // Emerald
+    { border: 'rgba(168, 85, 247, 0.4)', bg: 'rgba(168, 85, 247, 0.15)', text: '#c084fc' },  // Purple
+    { border: 'rgba(244, 63, 94, 0.4)',  bg: 'rgba(244, 63, 94, 0.15)',  text: '#fb7185' },  // Rose
+    { border: 'rgba(234, 179, 8, 0.4)',  bg: 'rgba(234, 179, 8, 0.15)',  text: '#facc15' },  // Yellow
+    { border: 'rgba(99, 102, 241, 0.4)', bg: 'rgba(99, 102, 241, 0.15)', text: '#818cf8' },  // Indigo
+    { border: 'rgba(20, 184, 166, 0.4)', bg: 'rgba(20, 184, 166, 0.15)', text: '#2dd4bf' },  // Teal
+  ]
+  const idx = Math.max(0, (groupNumber || 1) - 1) % palettes.length
+  return palettes[idx]
+}
 
 export default function TeamsPanel() {
   const [teams, setTeams] = useState<TeamRow[]>([])
@@ -24,8 +40,15 @@ export default function TeamsPanel() {
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set())
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false)
   const [isBatchDeleting, startBatchDeleteTransition] = useTransition()
-  const [targetAssignGroup, setTargetAssignGroup] = useState<string>('R1-G2')
+  const [targetAssignGroup, setTargetAssignGroup] = useState<string>('R1-G1')
   const [isAssigning, startAssignTransition] = useTransition()
+  const [customBulkRound, setCustomBulkRound] = useState<number>(1)
+  const [customBulkGroup, setCustomBulkGroup] = useState<number>(9)
+
+  // Dynamic unlimited groups state
+  const [userAddedGroups, setUserAddedGroups] = useState<number[]>([])
+  const [showAddGroupModal, setShowAddGroupModal] = useState(false)
+  const [newGroupInput, setNewGroupInput] = useState('')
 
   // Filter state & notification banner
   const [selectedFilter, setSelectedFilter] = useState<string>('all')
@@ -179,15 +202,47 @@ export default function TeamsPanel() {
     }
   }
 
+  const knownGroups = useMemo(() => {
+    const set = new Set<number>([1, 2, 3, 4, 5, 6, 7, 8])
+    teams.forEach((t) => {
+      if (typeof t.group_number === 'number') set.add(t.group_number)
+    })
+    userAddedGroups.forEach((g) => set.add(g))
+    return Array.from(set).sort((a, b) => a - b)
+  }, [teams, userAddedGroups])
+
+  const assignOptions = useMemo(() => {
+    const options: { value: string; label: string }[] = []
+    for (let r = 1; r <= 3; r++) {
+      knownGroups.forEach((g) => {
+        options.push({ value: `R${r}-G${g}`, label: `Round ${r} · Group ${g}` })
+      })
+    }
+    return options
+  }, [knownGroups])
+
+  const handleAddNewGroup = (groupNum: number) => {
+    if (isNaN(groupNum) || groupNum < 1) return
+    setUserAddedGroups((prev) => (prev.includes(groupNum) ? prev : [...prev, groupNum]))
+    setShowAddGroupModal(false)
+    setNewGroupInput('')
+    setSelectedFilter(`R1-G${groupNum}`)
+    setTargetAssignGroup(`R1-G${groupNum}`)
+    setBannerMessage({
+      type: 'success',
+      text: `🎉 Group ${groupNum} created! Filter set to Round 1 · Group ${groupNum}. You can now assign teams to it.`,
+    })
+  }
+
   // Dynamic filter options based on tournament rounds & groups
   const filterOptions = useMemo(() => {
     const list: { value: string; label: string }[] = [{ value: 'all', label: `All Teams (${teams.length})` }]
 
-    // Add Groups 1 to 8 across Rounds 1 to 5
+    // Add all known groups across Rounds 1 to 5
     for (let r = 1; r <= 5; r++) {
-      for (let g = 1; g <= 8; g++) {
+      for (const g of knownGroups) {
         const count = teams.filter((t) => (t.round ?? 1) === r && (t.group_number ?? 1) === g).length
-        if (count > 0 || (r === 1 && g <= 8) || (r <= 3 && g <= 4)) {
+        if (count > 0 || r === 1 || (r <= 3 && g <= 8) || userAddedGroups.includes(g)) {
           list.push({
             value: `R${r}-G${g}`,
             label: `Round ${r} · Group ${g}${count > 0 ? ` (${count})` : ''}`,
@@ -207,7 +262,7 @@ export default function TeamsPanel() {
     })
 
     return list
-  }, [teams])
+  }, [teams, knownGroups, userAddedGroups])
 
   return (
     <section className="panel-card" id="teams-panel-section">
@@ -233,6 +288,15 @@ export default function TeamsPanel() {
               🗑️ Delete Selected ({selectedTeamIds.size})
             </button>
           )}
+          <button
+            id="btn-add-group"
+            className="btn btn--secondary btn--sm"
+            onClick={() => setShowAddGroupModal(true)}
+            style={{ fontWeight: 700, color: 'var(--clr-accent)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+            title="Create a new tournament group (unlimited)"
+          >
+            ➕ Add Group
+          </button>
           <button
             id="btn-import-teams"
             className="btn btn--secondary btn--sm"
@@ -321,28 +385,62 @@ export default function TeamsPanel() {
               <span style={{ fontSize: '12px', color: 'var(--clr-text-2)', fontWeight: 600 }}>
                 Move to:
               </span>
-              <select
-                id="select-bulk-target-group"
-                className="field-select"
-                style={{ padding: '4px 8px', fontSize: '12px', width: 'auto', background: 'var(--clr-bg-3)' }}
-                value={targetAssignGroup}
-                onChange={(e) => setTargetAssignGroup(e.target.value)}
-                disabled={isAssigning}
-              >
-                <option value="R1-G1">Round 1 · Group 1</option>
-                <option value="R1-G2">Round 1 · Group 2</option>
-                <option value="R1-G3">Round 1 · Group 3</option>
-                <option value="R1-G4">Round 1 · Group 4</option>
-                <option value="R1-G5">Round 1 · Group 5</option>
-                <option value="R2-G1">Round 2 · Group 1</option>
-                <option value="R2-G2">Round 2 · Group 2</option>
-                <option value="R3-G1">Round 3 · Group 1</option>
-              </select>
+              {targetAssignGroup !== 'custom' ? (
+                <select
+                  id="select-bulk-target-group"
+                  className="field-select"
+                  style={{ padding: '4px 8px', fontSize: '12px', width: 'auto', background: 'var(--clr-bg-3)' }}
+                  value={targetAssignGroup}
+                  onChange={(e) => setTargetAssignGroup(e.target.value)}
+                  disabled={isAssigning}
+                >
+                  {assignOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                  <option value="custom">+ Custom Round &amp; Group...</option>
+                </select>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <select
+                    className="field-select"
+                    style={{ padding: '4px 6px', fontSize: '12px', width: 'auto', background: 'var(--clr-bg-3)' }}
+                    value={customBulkRound}
+                    onChange={(e) => setCustomBulkRound(parseInt(e.target.value, 10))}
+                  >
+                    {[1, 2, 3, 4, 5].map((r) => (
+                      <option key={r} value={r}>Round {r}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Group #"
+                    className="field-input"
+                    style={{ padding: '4px 6px', fontSize: '12px', width: '70px' }}
+                    value={customBulkGroup}
+                    onChange={(e) => setCustomBulkGroup(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--xs"
+                    onClick={() => setTargetAssignGroup('R1-G1')}
+                    title="Cancel custom group"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
                 id="btn-apply-bulk-assign"
                 className="btn btn--secondary btn--sm"
-                onClick={() => handleBatchAssign(targetAssignGroup)}
+                onClick={() => {
+                  if (targetAssignGroup === 'custom') {
+                    handleBatchAssign(`R${customBulkRound}-G${customBulkGroup}`)
+                  } else {
+                    handleBatchAssign(targetAssignGroup)
+                  }
+                }}
                 disabled={isAssigning}
                 style={{ fontWeight: 700 }}
               >
@@ -529,37 +627,38 @@ export default function TeamsPanel() {
                           borderRadius: '4px',
                           cursor: 'pointer',
                           outline: 'none',
-                          border: `1px solid ${
-                            team.group_number === 1 ? 'rgba(245, 158, 11, 0.4)' :
-                            team.group_number === 2 ? 'rgba(56, 189, 248, 0.4)' :
-                            team.group_number === 3 ? 'rgba(52, 211, 153, 0.4)' :
-                            'rgba(168, 85, 247, 0.4)'
-                          }`,
-                          background: `${
-                            team.group_number === 1 ? 'rgba(245, 158, 11, 0.15)' :
-                            team.group_number === 2 ? 'rgba(56, 189, 248, 0.15)' :
-                            team.group_number === 3 ? 'rgba(52, 211, 153, 0.15)' :
-                            'rgba(168, 85, 247, 0.15)'
-                          }`,
-                          color: `${
-                            team.group_number === 1 ? '#fbbf24' :
-                            team.group_number === 2 ? '#38bdf8' :
-                            team.group_number === 3 ? '#34d399' :
-                            '#c084fc'
-                          }`,
+                          border: `1px solid ${getGroupBadgeStyle(team.group_number ?? 1).border}`,
+                          background: getGroupBadgeStyle(team.group_number ?? 1).bg,
+                          color: getGroupBadgeStyle(team.group_number ?? 1).text,
                         }}
                         value={`R${team.round || 1}-G${team.group_number || 1}`}
-                        onChange={(e) => handleSingleTeamAssign(team.id, e.target.value)}
+                        onChange={(e) => {
+                          if (e.target.value === 'custom') {
+                            const customNum = prompt(
+                              `Enter Group Number for "${team.name}" (Round ${team.round || 1}):`,
+                              String((team.group_number || 1) + 1)
+                            )
+                            if (customNum) {
+                              const num = parseInt(customNum, 10)
+                              if (num > 0) {
+                                handleSingleTeamAssign(team.id, `R${team.round || 1}-G${num}`)
+                              }
+                            }
+                          } else {
+                            handleSingleTeamAssign(team.id, e.target.value)
+                          }
+                        }}
                         disabled={isAssigning}
                       >
-                        <option value="R1-G1">Round 1 · Group 1</option>
-                        <option value="R1-G2">Round 1 · Group 2</option>
-                        <option value="R1-G3">Round 1 · Group 3</option>
-                        <option value="R1-G4">Round 1 · Group 4</option>
-                        <option value="R1-G5">Round 1 · Group 5</option>
-                        <option value="R2-G1">Round 2 · Group 1</option>
-                        <option value="R2-G2">Round 2 · Group 2</option>
-                        <option value="R3-G1">Round 3 · Group 1</option>
+                        {assignOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                        {team.group_number && !assignOptions.some(o => o.value === `R${team.round || 1}-G${team.group_number}`) && (
+                          <option value={`R${team.round || 1}-G${team.group_number}`}>
+                            Round {team.round || 1} · Group {team.group_number}
+                          </option>
+                        )}
+                        <option value="custom">+ Custom Group #...</option>
                       </select>
                     </td>
                     <td>
@@ -637,6 +736,62 @@ export default function TeamsPanel() {
         confirmLabel={`Delete ${selectedTeamIds.size} Teams`}
         isPending={isBatchDeleting}
       />
+
+      {/* Add New Group Modal */}
+      {showAddGroupModal && (
+        <Modal
+          isOpen={showAddGroupModal}
+          onClose={() => setShowAddGroupModal(false)}
+          title="Add New Tournament Group"
+          size="sm"
+        >
+          <div className="form-stack">
+            <p style={{ fontSize: '13px', color: 'var(--clr-text-2)' }}>
+              Enter any group number to create. Groups are unlimited (e.g. 9, 10, 16, 20...).
+            </p>
+            <div className="form-field">
+              <label className="field-label" htmlFor="new-group-number-input">Group Number *</label>
+              <input
+                id="new-group-number-input"
+                type="number"
+                min="1"
+                className="field-input"
+                placeholder="e.g. 9, 10, 15..."
+                value={newGroupInput}
+                onChange={(e) => setNewGroupInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const num = parseInt(newGroupInput, 10)
+                    if (num > 0) handleAddNewGroup(num)
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setShowAddGroupModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => {
+                  const num = parseInt(newGroupInput, 10)
+                  if (num > 0) handleAddNewGroup(num)
+                }}
+                disabled={!newGroupInput || parseInt(newGroupInput, 10) < 1}
+              >
+                Create Group {newGroupInput ? parseInt(newGroupInput, 10) : ''}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {deleteError && <p className="form-error" role="alert" style={{ margin: '12px 16px 0' }}>{deleteError}</p>}
     </section>

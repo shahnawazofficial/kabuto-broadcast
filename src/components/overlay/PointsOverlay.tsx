@@ -74,8 +74,10 @@ export default function PointsOverlay({ initialMatchId, initialLayout = 'hud' }:
     }
   }, [fetchData])
 
-  // Always render leaderboard on OBS canvas (toggleable via OBS scene or broadcast panel)
-
+  // If hidden via broadcast control panel, render completely transparent canvas
+  if (!showPoints) {
+    return <div className="obs-canvas obs-canvas--empty" />
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // LAYOUT 1: BGMI PRO SERIES IN-GAME RIGHT-SIDE HUD (DEFAULT)

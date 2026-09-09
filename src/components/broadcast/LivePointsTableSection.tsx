@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useTransition } from 'react'
+import { useState, useEffect, useCallback, useMemo, useTransition, useRef } from 'react'
 import Image from 'next/image'
 import type { MatchRow, TeamRow, LiveScoreRow } from '@/types/database'
 import {
@@ -14,7 +14,8 @@ import {
   toggleOverlayStatusBars,
   ScorePayload,
 } from '@/app/broadcast/actions/scores'
-import { setCurrentBroadcastMatch } from '@/app/broadcast/actions/broadcast'
+import { setCurrentBroadcastMatch, triggerTeamEliminated } from '@/app/broadcast/actions/broadcast'
+import { getTeamsWithRoundGroup } from '@/app/broadcast/actions/teams'
 import { notifyRealtimeChange } from '@/lib/supabase/realtime'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
@@ -94,10 +95,19 @@ export default function LivePointsTableSection({ className = '' }: Props) {
   const [autoSort, setAutoSort] = useState(true)
   const [showStatusOnHud, setShowStatusOnHud] = useState(true)
 
+  // Elimination pop-up trigger tracking
+  const [pendingEliminatedTeamIds, setPendingEliminatedTeamIds] = useState<Set<string>>(new Set())
+  const savedAliveRef = useRef<Record<string, number>>({})
+  const [autoTriggerElimPopup, setAutoTriggerElimPopup] = useState(true)
+
   // pendingGroup: set when operator switches to a group that has no DB match yet.
   // Stores { round, group } so the UI can show the correct empty state and "Start Match" button
   // without silently creating a DB record.
   const [pendingGroup, setPendingGroup] = useState<{ round: number; group: number } | null>(null)
+  const [teamGroups, setTeamGroups] = useState<number[]>([])
+  const [userAddedGroups, setUserAddedGroups] = useState<number[]>([])
+  const [isAddingGroup, setIsAddingGroup] = useState(false)
+  const [newGroupNumInput, setNewGroupNumInput] = useState('')
 
   // ─── 1. Load matches on mount ──────────────────────────────────────────────
   const loadMatches = useCallback(async () => {
@@ -116,6 +126,18 @@ export default function LivePointsTableSection({ className = '' }: Props) {
       setMatches(DEMO_MATCHES)
       setSelectedMatchId(DEMO_MATCHES[0].id)
     }
+
+    // Discover any groups currently assigned to teams
+    try {
+      const teamsRes = await getTeamsWithRoundGroup()
+      if (teamsRes.success && teamsRes.data) {
+        const grps = teamsRes.data
+          .map((t) => t.group_number)
+          .filter((g): g is number => typeof g === 'number')
+        setTeamGroups(Array.from(new Set(grps)))
+      }
+    } catch { /* quiet fallback */ }
+
     setMatchesLoading(false)
   }, [])
 
@@ -186,6 +208,13 @@ export default function LivePointsTableSection({ className = '' }: Props) {
       }
     })
 
+    const initialSavedAlive: Record<string, number> = {}
+    Object.values(newRows).forEach((row) => {
+      initialSavedAlive[row.teamId] = row.alive
+    })
+    savedAliveRef.current = initialSavedAlive
+    setPendingEliminatedTeamIds(new Set())
+
     setScoresData(newRows)
     setScoresLoading(false)
   }, [])
@@ -224,6 +253,7 @@ export default function LivePointsTableSection({ className = '' }: Props) {
         if (val !== null && val > 1) {
           updated.alive = 0
           updated.knocked = 0
+          setPendingEliminatedTeamIds((prev) => new Set(prev).add(teamId))
           if (selectedMatchId) {
             setTeamAliveStatus(selectedMatchId, teamId, 0, 0).catch(() => {})
             notifyRealtimeChange('live_scores', 'UPDATE', { matchId: selectedMatchId })
@@ -232,6 +262,11 @@ export default function LivePointsTableSection({ className = '' }: Props) {
           // If placement cleared and previously eliminated, restore to 4 alive
           updated.alive = 4
           updated.knocked = 0
+          setPendingEliminatedTeamIds((prev) => {
+            const next = new Set(prev)
+            next.delete(teamId)
+            return next
+          })
           if (selectedMatchId) {
             setTeamAliveStatus(selectedMatchId, teamId, 4, 0).catch(() => {})
             notifyRealtimeChange('live_scores', 'UPDATE', { matchId: selectedMatchId })
@@ -254,11 +289,23 @@ export default function LivePointsTableSection({ className = '' }: Props) {
     field: 'alive' | 'knocked',
     value: number
   ) => {
+    if (field === 'alive') {
+      if (value === 0) {
+        setPendingEliminatedTeamIds((prev) => new Set(prev).add(teamId))
+      } else {
+        setPendingEliminatedTeamIds((prev) => {
+          const next = new Set(prev)
+          next.delete(teamId)
+          return next
+        })
+      }
+    }
+
     setScoresData((prev) => {
       const current = prev[teamId]
       if (!current) return prev
 
-      let newAlive = field === 'alive' ? Math.max(0, Math.min(4, value)) : current.alive
+      const newAlive = field === 'alive' ? Math.max(0, Math.min(4, value)) : current.alive
       let newKnocked = field === 'knocked' ? Math.max(0, Math.min(3, value)) : current.knocked
 
       if (newAlive === 0) {
@@ -283,6 +330,37 @@ export default function LivePointsTableSection({ className = '' }: Props) {
         },
       }
     })
+  }
+
+  // Instantly broadcast elimination pop-up directly for a specific team with their current kills
+  const handleInstantTriggerElimination = async (teamId: string) => {
+    const row = scoresData[teamId]
+    if (!row) return
+    const kills = row.kills || 0
+
+    const res = await triggerTeamEliminated(teamId, kills)
+    if (res.success) {
+      notifyRealtimeChange('broadcast_state', 'UPDATE', {
+        show_elimination: true,
+        elimination_team_id: teamId,
+        elimination_kills: kills,
+      })
+      // Clear from pending since it is already broadcasted
+      setPendingEliminatedTeamIds((prev) => {
+        const next = new Set(prev)
+        next.delete(teamId)
+        return next
+      })
+      setStatusMessage({
+        type: 'success',
+        text: `Elimination pop-up broadcasted for ${row.teamName} with ${kills} kill${kills === 1 ? '' : 's'}!`,
+      })
+    } else {
+      setStatusMessage({
+        type: 'error',
+        text: res.error || 'Failed to trigger elimination pop-up.',
+      })
+    }
   }
 
   // Toggle HUD status visibility
@@ -323,11 +401,32 @@ export default function LivePointsTableSection({ className = '' }: Props) {
   }, [matches])
 
   const uniqueGroups = useMemo(() => {
-    const set = new Set<number>()
+    const set = new Set<number>([1, 2, 3, 4, 5, 6, 7, 8])
     matches.forEach((m) => { if (m.group_number) set.add(m.group_number) })
-    if (set.size === 0) [1, 2, 3, 4, 5, 6, 7, 8].forEach((g) => set.add(g))
+    teamGroups.forEach((g) => set.add(g))
+    userAddedGroups.forEach((g) => set.add(g))
+    if (pendingGroup?.group) set.add(pendingGroup.group)
     return Array.from(set).sort((a, b) => a - b)
-  }, [matches])
+  }, [matches, teamGroups, userAddedGroups, pendingGroup])
+
+  const handleAddNewGroup = (groupNum: number) => {
+    if (isNaN(groupNum) || groupNum < 1) return
+    setUserAddedGroups((prev) => (prev.includes(groupNum) ? prev : [...prev, groupNum]))
+    setIsAddingGroup(false)
+    setNewGroupNumInput('')
+
+    const targetRound = currentMatch?.round ?? 1
+    const existingForGroup = matches
+      .filter((m) => m.round === targetRound && m.group_number === groupNum)
+      .sort((a, b) => a.match_number - b.match_number)
+
+    if (existingForGroup.length > 0) {
+      setPendingGroup(null)
+      handleMatchChange(existingForGroup[0].id)
+    } else {
+      setPendingGroup({ round: targetRound, group: groupNum })
+    }
+  }
 
   // Maps are fixed — only Miramar, Erangel, Rondo
   const uniqueMaps = ALLOWED_MAPS
@@ -485,7 +584,63 @@ export default function LivePointsTableSection({ className = '' }: Props) {
       const res = await saveScores(selectedMatchId, payload)
       if (res.success) {
         notifyRealtimeChange('live_scores', 'UPDATE', { matchId: selectedMatchId })
-        setStatusMessage({ type: 'success', text: 'Scores and squad health saved successfully to Supabase!' })
+
+        // Check for teams that should trigger the separate elimination overlay popup
+        const newlyEliminatedTeams: TeamScoreItem[] = []
+        if (autoTriggerElimPopup) {
+          Object.values(scoresData).forEach((row) => {
+            if (row.alive === 0) {
+              const wasAlive = (savedAliveRef.current[row.teamId] ?? 4) > 0
+              const wasPending = pendingEliminatedTeamIds.has(row.teamId)
+              if (wasPending || wasAlive) {
+                newlyEliminatedTeams.push(row)
+              }
+            }
+          })
+        }
+
+        // Trigger elimination popup(s) for the eliminated team(s) with their current kill points
+        if (newlyEliminatedTeams.length > 0) {
+          const firstTeam = newlyEliminatedTeams[0]
+          await triggerTeamEliminated(firstTeam.teamId, firstTeam.kills)
+          notifyRealtimeChange('broadcast_state', 'UPDATE', {
+            show_elimination: true,
+            elimination_team_id: firstTeam.teamId,
+            elimination_kills: firstTeam.kills,
+          })
+
+          // If multiple teams were marked eliminated simultaneously, sequence them with 6.2s delay
+          for (let i = 1; i < newlyEliminatedTeams.length; i++) {
+            const nextTeam = newlyEliminatedTeams[i]
+            setTimeout(async () => {
+              await triggerTeamEliminated(nextTeam.teamId, nextTeam.kills)
+              notifyRealtimeChange('broadcast_state', 'UPDATE', {
+                show_elimination: true,
+                elimination_team_id: nextTeam.teamId,
+                elimination_kills: nextTeam.kills,
+              })
+            }, i * 6200)
+          }
+
+          const teamSummaries = newlyEliminatedTeams
+            .map((t) => `${t.teamName} (${t.kills} kill${t.kills === 1 ? '' : 's'})`)
+            .join(', ')
+
+          setStatusMessage({
+            type: 'success',
+            text: `Scores saved! Triggered Elimination pop-up for ${teamSummaries}!`,
+          })
+        } else {
+          setStatusMessage({ type: 'success', text: 'Scores and squad health saved successfully to Supabase!' })
+        }
+
+        // Update baseline saved alive status & clear pending set
+        const updatedSavedAlive: Record<string, number> = {}
+        Object.values(scoresData).forEach((r) => {
+          updatedSavedAlive[r.teamId] = r.alive
+        })
+        savedAliveRef.current = updatedSavedAlive
+        setPendingEliminatedTeamIds(new Set())
       } else {
         setStatusMessage({ type: 'error', text: res.error ?? 'Failed to save scores.' })
       }
@@ -610,7 +765,10 @@ export default function LivePointsTableSection({ className = '' }: Props) {
               ) : (
                 <>
                   <span>💾</span>
-                  <span>Save Scores</span>
+                  <span>
+                    Save Scores
+                    {pendingEliminatedTeamIds.size > 0 && ` (${pendingEliminatedTeamIds.size} Elim Pop)`}
+                  </span>
                 </>
               )}
             </button>
@@ -682,7 +840,7 @@ export default function LivePointsTableSection({ className = '' }: Props) {
             }}
             disabled={matchesLoading}
           >
-            {matches.map((m, globalIdx) => {
+            {matches.map((m) => {
               // Compute per-group label: how many matches exist for this group before this one
               const groupMatches = matches
                 .filter((x) => x.group_number === m.group_number)
@@ -719,25 +877,96 @@ export default function LivePointsTableSection({ className = '' }: Props) {
 
         {/* Group selector — value tracks pendingGroup when no DB match selected yet */}
         <div className="points-selector-group">
-          <label htmlFor="select-scoring-group" className="points-selector-label">
-            GROUP
-          </label>
-          <select
-            id="select-scoring-group"
-            className="select points-select"
-            value={pendingGroup ? pendingGroup.group : (currentMatch?.group_number ?? 1)}
-            onChange={(e) => {
-              setPendingGroup(null)
-              handleSelectAttribute('group', e.target.value)
-            }}
-            disabled={matchesLoading}
-          >
-            {uniqueGroups.map((g) => (
-              <option key={g} value={g}>
-                Group {g}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <label htmlFor="select-scoring-group" className="points-selector-label">
+              GROUP
+            </label>
+            {!isAddingGroup && (
+              <button
+                type="button"
+                onClick={() => setIsAddingGroup(true)}
+                style={{
+                  fontSize: '10px',
+                  color: 'var(--clr-accent)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  padding: '0 2px',
+                  textTransform: 'uppercase',
+                }}
+                title="Add a new group (unlimited)"
+              >
+                + Add
+              </button>
+            )}
+          </div>
+
+          {!isAddingGroup ? (
+            <select
+              id="select-scoring-group"
+              className="select points-select"
+              value={pendingGroup ? pendingGroup.group : (currentMatch?.group_number ?? 1)}
+              onChange={(e) => {
+                if (e.target.value === '__add_new__') {
+                  setIsAddingGroup(true)
+                } else {
+                  setPendingGroup(null)
+                  handleSelectAttribute('group', e.target.value)
+                }
+              }}
+              disabled={matchesLoading}
+            >
+              {uniqueGroups.map((g) => (
+                <option key={g} value={g}>
+                  Group {g}
+                </option>
+              ))}
+              <option value="__add_new__">+ Add New Group...</option>
+            </select>
+          ) : (
+            <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+              <input
+                type="number"
+                min="1"
+                placeholder="#"
+                className="select points-select"
+                style={{ width: '60px', padding: '4px 6px', fontSize: '12px' }}
+                value={newGroupNumInput}
+                onChange={(e) => setNewGroupNumInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const num = parseInt(newGroupNumInput, 10)
+                    if (num > 0) handleAddNewGroup(num)
+                  }
+                }}
+                autoFocus
+              />
+              <button
+                type="button"
+                className="btn btn--primary btn--xs"
+                style={{ padding: '3px 6px', fontSize: '11px', fontWeight: 700 }}
+                onClick={() => {
+                  const num = parseInt(newGroupNumInput, 10)
+                  if (num > 0) handleAddNewGroup(num)
+                }}
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--xs"
+                style={{ padding: '3px 5px', fontSize: '11px' }}
+                onClick={() => {
+                  setIsAddingGroup(false)
+                  setNewGroupNumInput('')
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Map selector — only Miramar, Erangel, Rondo */}
@@ -748,24 +977,24 @@ export default function LivePointsTableSection({ className = '' }: Props) {
           <select
             id="select-scoring-map"
             className="select points-select"
-            value={currentMatch?.map ?? 'Miramar'}
+            value={currentMatch?.map ?? 'Erangel'}
             onChange={(e) => handleSelectAttribute('map', e.target.value)}
             disabled={matchesLoading}
           >
-            {uniqueMaps.map((map) => (
-              <option key={map} value={map}>
-                {map}
+            {uniqueMaps.map((m) => (
+              <option key={m} value={m}>
+                {m}
               </option>
             ))}
           </select>
         </div>
 
-        {/* Match selector — per-group only (Match 1, 2, 3 of this group) */}
+        {/* Per-group match selector: choose or start next match for THIS group */}
         <div className="points-selector-group">
           <label htmlFor="select-scoring-match-number" className="points-selector-label">
             MATCH (THIS GROUP)
           </label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ display: 'flex', gap: '6px' }}>
             <select
               id="select-scoring-match-number"
               className="select points-select"
@@ -818,6 +1047,19 @@ export default function LivePointsTableSection({ className = '' }: Props) {
             {showStatusOnHud ? '🟢 HUD Status: ON' : '⚪ HUD Status: OFF'}
           </button>
         </div>
+
+        {/* Auto Elimination Pop-up toggle */}
+        <div className="points-selector-group points-selector-group--toggle">
+          <label className="points-selector-label">ELIM POP-UP</label>
+          <button
+            type="button"
+            className={`btn btn--sm ${autoTriggerElimPopup ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => setAutoTriggerElimPopup((prev) => !prev)}
+            title="Automatically trigger the separate Team Elimination pop-up overlay when an eliminated team is saved"
+          >
+            {autoTriggerElimPopup ? '💥 Pop on Save: ON' : '⚪ Pop on Save: OFF'}
+          </button>
+        </div>
       </div>
 
       {/* ── Quick Group Switcher Bar ── */}
@@ -842,6 +1084,20 @@ export default function LivePointsTableSection({ className = '' }: Props) {
               </button>
             )
           })}
+          <button
+            type="button"
+            className="points-group-pill"
+            style={{
+              borderColor: 'rgba(245, 158, 11, 0.4)',
+              color: 'var(--clr-accent)',
+              fontWeight: 700,
+              background: 'rgba(245, 158, 11, 0.1)',
+            }}
+            onClick={() => setIsAddingGroup(true)}
+            title="Add a new group (unlimited)"
+          >
+            + Add Group
+          </button>
         </div>
       </div>
 
@@ -926,6 +1182,7 @@ export default function LivePointsTableSection({ className = '' }: Props) {
                 const isTop1 = rank === 1
                 const isTop2 = rank === 2
                 const isTop3 = rank === 3
+                const isPendingElim = pendingEliminatedTeamIds.has(row.teamId)
 
                 return (
                   <tr
@@ -1012,19 +1269,34 @@ export default function LivePointsTableSection({ className = '' }: Props) {
                               {row.knocked} KNOCK
                             </span>
                           )}
+                          {isPendingElim && (
+                            <span
+                              style={{
+                                fontSize: '9px',
+                                fontWeight: 800,
+                                color: '#ef4444',
+                                background: 'rgba(239, 68, 68, 0.18)',
+                                border: '1px solid rgba(239, 68, 68, 0.4)',
+                                padding: '1px 4px',
+                                borderRadius: '3px',
+                                letterSpacing: '0.5px',
+                              }}
+                              title="Elimination pop-up overlay will broadcast on Save"
+                            >
+                              POPS ON SAVE
+                            </span>
+                          )}
                         </div>
 
                         {/* Quick Action Buttons */}
                         <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-                          {[4, 3, 2, 1, 0].map((num) => (
+                          {[4, 3, 2, 1].map((num) => (
                             <button
                               key={num}
                               type="button"
                               className={`btn btn--xs ${
                                 row.alive === num
-                                  ? num === 0
-                                    ? 'btn--danger'
-                                    : 'btn--primary'
+                                  ? 'btn--primary'
                                   : 'btn--ghost'
                               }`}
                               style={{
@@ -1035,11 +1307,30 @@ export default function LivePointsTableSection({ className = '' }: Props) {
                                 fontWeight: row.alive === num ? 700 : 500,
                               }}
                               onClick={() => handleStatusChange(row.teamId, 'alive', num)}
-                              title={num === 0 ? 'Eliminate squad (0 players)' : `Set ${num} players alive`}
+                              title={`Set ${num} players alive`}
                             >
-                              {num === 0 ? '☠️' : num}
+                              {num}
                             </button>
                           ))}
+
+                          {/* Distinct Team Eliminated Button */}
+                          <button
+                            type="button"
+                            className={`btn btn--xs ${row.alive === 0 ? 'btn--danger' : 'btn--ghost'}`}
+                            style={{
+                              padding: '1px 6px',
+                              fontSize: '10px',
+                              height: '20px',
+                              fontWeight: 700,
+                              background: row.alive === 0 ? '#ef4444' : 'rgba(239, 68, 68, 0.12)',
+                              color: row.alive === 0 ? '#ffffff' : '#f87171',
+                              border: '1px solid rgba(239, 68, 68, 0.35)',
+                            }}
+                            onClick={() => handleStatusChange(row.teamId, 'alive', 0)}
+                            title="Eliminate team squad (0 alive) — triggers separate elimination pop-up on Save"
+                          >
+                            ☠️ ELIM
+                          </button>
 
                           {/* Knocked toggle button */}
                           <button
@@ -1059,6 +1350,27 @@ export default function LivePointsTableSection({ className = '' }: Props) {
                           >
                             ⚠️ {row.knocked}
                           </button>
+
+                          {/* Instant Pop Broadcast button when team is eliminated */}
+                          {row.alive === 0 && (
+                            <button
+                              type="button"
+                              className="btn btn--xs"
+                              style={{
+                                padding: '1px 5px',
+                                fontSize: '10px',
+                                height: '20px',
+                                fontWeight: 700,
+                                background: 'rgba(245, 158, 11, 0.2)',
+                                color: '#fbbf24',
+                                border: '1px solid rgba(245, 158, 11, 0.45)',
+                              }}
+                              onClick={() => handleInstantTriggerElimination(row.teamId)}
+                              title={`Broadcast elimination pop-up overlay immediately for ${row.teamName} (${row.kills} kills)`}
+                            >
+                              ⚡ Pop
+                            </button>
+                          )}
                         </div>
                       </div>
                     </td>
