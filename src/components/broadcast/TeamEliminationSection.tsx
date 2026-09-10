@@ -59,7 +59,15 @@ export default function TeamEliminationSection({ onActivate }: Props) {
           setKills(stateRes.data.elimination_kills)
         }
         if (stateRes.data.show_elimination) {
-          setIsActive(true)
+          const updatedAt = stateRes.data.updated_at ? new Date(stateRes.data.updated_at).getTime() : 0
+          const elapsed = updatedAt ? Date.now() - updatedAt : 0
+          if (elapsed < 4000) {
+            startLocalCountdown()
+          } else {
+            setIsActive(false)
+            hideTeamEliminated().catch(() => {})
+            notifyRealtimeChange('broadcast_state', 'UPDATE', { show_elimination: false })
+          }
         }
       }
     } catch {
@@ -69,12 +77,12 @@ export default function TeamEliminationSection({ onActivate }: Props) {
     }
   }, [])
 
-  // Start 5s countdown timer in operator UI
+  // Start 4s countdown timer in operator UI
   const startLocalCountdown = useCallback(() => {
     if (countdownTimerRef.current) {
       clearInterval(countdownTimerRef.current)
     }
-    setCountdown(5)
+    setCountdown(4)
     setIsActive(true)
 
     countdownTimerRef.current = setInterval(() => {
@@ -82,6 +90,8 @@ export default function TeamEliminationSection({ onActivate }: Props) {
         if (prev <= 1) {
           if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
           setIsActive(false)
+          hideTeamEliminated().catch(() => {})
+          notifyRealtimeChange('broadcast_state', 'UPDATE', { show_elimination: false })
           return 0
         }
         return prev - 1
@@ -140,7 +150,7 @@ export default function TeamEliminationSection({ onActivate }: Props) {
           elimination_kills: kills,
         })
         if (onActivate) onActivate('eliminationGraphic')
-        setFeedback('Team Eliminated broadcasted! (Auto-hides after 5s)')
+        setFeedback('Team Eliminated broadcasted! (Auto-vanishes after 4s)')
         setTimeout(() => setFeedback(null), 4000)
       } else {
         setFeedback(res.error || 'Failed to trigger elimination')
@@ -298,7 +308,7 @@ export default function TeamEliminationSection({ onActivate }: Props) {
           >
             <span className="text-lg">☠️</span>
             <span>{isPending ? 'BROADCASTING...' : 'TEAM ELIMINATED'}</span>
-            <span className="text-xs font-normal opacity-75">(5s Auto)</span>
+            <span className="text-xs font-normal opacity-75">(4s Auto)</span>
           </button>
 
           {isActive && (

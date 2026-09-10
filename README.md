@@ -22,7 +22,7 @@ Designed for tournament directors, broadcast operators, and production casters t
 - 🎮 **Dedicated Broadcast Control Panel (`/broadcast`)**: Ergonomically structured operator dashboard with immediate visual feedback, state indicators, and dedicated management cards for live scoring, team/player profiles, player spotlights, team eliminations, and match briefing graphics.
 - 📊 **Dynamic Points Table (`/overlay/points`)**: Broadcast-ready 16-team leaderboard featuring live rank calculations, kill/placement breakdown, team crests, and dynamic top-3 champion emphasis with 100% canvas transparency.
 - 👤 **Player Spotlight Graphic (`/overlay/player`)**: Esports lower-third overlay featuring high-contrast IGN focus, player photo integration, team logos, and dual-tone gradient styling.
-- 💀 **Team Elimination Alert (`/overlay/elimination`)**: High-impact elimination banner with sharp geometric accents, kill counters, and an automatic ~5-second broadcast exit transition.
+- 💀 **Team Elimination Alert (`/overlay/elimination`)**: High-impact elimination banner with sharp geometric accents, kill counters, and an automatic ~4-second broadcast exit transition (vanishes in 3–5 seconds).
 - ⚔️ **Match Briefing Graphic (`/overlay/match`)**: Tournament matchup overview presenting Round, Group, Map (Erangel / Miramar / Sanhok / Vikendi), and Match number with smooth entrance animations.
 - ⚡ **Zero-Refresh Realtime Sync**: Overlays synchronize instantly via Supabase Realtime WebSocket events and local fallback channels without reloading OBS Browser Sources.
 
@@ -87,7 +87,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 | **Operator Control Panel** | `http://localhost:3000/broadcast` | Protected tournament operator dashboard |
 | **Points Table Overlay** | `http://localhost:3000/overlay/points` | Fullscreen 1920×1080 live leaderboard |
 | **Player Graphic Overlay** | `http://localhost:3000/overlay/player` | Lower-third player spotlight |
-| **Team Elimination Overlay**| `http://localhost:3000/overlay/elimination` | Auto-timed 5-second elimination notification |
+| **Team Elimination Overlay**| `http://localhost:3000/overlay/elimination` | Auto-timed 4-second elimination notification |
 | **Match Graphic Overlay** | `http://localhost:3000/overlay/match` | Pre-match briefing graphic |
 
 ---

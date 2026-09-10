@@ -441,6 +441,14 @@ export async function getLiveEliminationOverlayData(): Promise<ActionResult<Elim
     // Supabase offline fallback
   }
 
+  // Auto-expire elimination popup if older than 4.5 seconds
+  const now = Date.now()
+  if (showElimination && eliminatedAt > 0 && now - eliminatedAt > 4500) {
+    showElimination = false
+    local.show_elimination = false
+    local.eliminated_at = null
+  }
+
   if (!showElimination) {
     return {
       success: true,

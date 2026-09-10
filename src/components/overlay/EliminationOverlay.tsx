@@ -9,7 +9,7 @@ import {
   getLiveEliminationOverlayData,
   hideTeamEliminated,
 } from '@/app/broadcast/actions/broadcast'
-import { subscribeToRealtimeTables } from '@/lib/supabase/realtime'
+import { notifyRealtimeChange, subscribeToRealtimeTables } from '@/lib/supabase/realtime'
 
 type AnimationPhase = 'entering' | 'visible' | 'exiting' | 'hidden'
 
@@ -30,6 +30,12 @@ export default function EliminationOverlay() {
   const [kills, setKills] = useState<number>(isPreview ? 7 : 0)
   const [animationPhase, setAnimationPhase] = useState<AnimationPhase>(isPreview ? 'visible' : 'hidden')
   const [isObs, setIsObs] = useState<boolean>(false)
+
+  const animationPhaseRef = useRef<AnimationPhase>(animationPhase)
+  animationPhaseRef.current = animationPhase
+
+  const isPreviewRef = useRef<boolean>(isPreview)
+  isPreviewRef.current = isPreview
 
   const lastEventIdRef = useRef<string>('')
   const exitTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -61,14 +67,17 @@ export default function EliminationOverlay() {
       setAnimationPhase('visible')
     }, 450)
 
+    // Vanish start: 3.5s
     exitTimerRef.current = setTimeout(() => {
       setAnimationPhase('exiting')
-    }, 5400)
+    }, 3500)
 
+    // Fully vanished: 4.0s
     hideTimerRef.current = setTimeout(() => {
-      setAnimationPhase(isPreview ? 'visible' : 'hidden')
-    }, 6000)
-  }, [team, isPreview])
+      setAnimationPhase(isPreviewRef.current ? 'visible' : 'hidden')
+      lastEventIdRef.current = ''
+    }, 4000)
+  }, [team])
 
   // Fetch live elimination state from broadcast_state via server action
   const fetchOverlayData = useCallback(async () => {
@@ -78,13 +87,25 @@ export default function EliminationOverlay() {
 
       const { showElimination, team: newTeam, kills: newKills, eliminatedAt } = res.data
 
+      // Check if this event was already triggered and expired (older than 4.5s)
+      const elapsed = eliminatedAt ? Date.now() - eliminatedAt : 0
+      if (eliminatedAt && elapsed > 4500) {
+        if (animationPhaseRef.current !== 'hidden' && !isPreviewRef.current) {
+          clearAllTimers()
+          setAnimationPhase('hidden')
+          lastEventIdRef.current = ''
+        }
+        return
+      }
+
       // If server says hidden or team is missing
       if (!showElimination || !newTeam) {
-        if (animationPhase !== 'hidden' && !isPreview) {
+        if (animationPhaseRef.current !== 'hidden' && !isPreviewRef.current) {
           clearAllTimers()
           setAnimationPhase('exiting')
           exitTimerRef.current = setTimeout(() => {
             setAnimationPhase('hidden')
+            lastEventIdRef.current = ''
           }, 550)
         }
         return
@@ -92,7 +113,7 @@ export default function EliminationOverlay() {
 
       // Active elimination event from broadcast!
       const eventId = `${newTeam.id}-${eliminatedAt || 0}-${newKills}`
-      if (eventId !== lastEventIdRef.current || animationPhase === 'hidden') {
+      if (eventId !== lastEventIdRef.current || animationPhaseRef.current === 'hidden') {
         lastEventIdRef.current = eventId
         setTeam(newTeam)
         setKills(newKills)
@@ -106,16 +127,18 @@ export default function EliminationOverlay() {
           setAnimationPhase('visible')
         }, 450)
 
-        // 3. Exit phase after 5.4s
+        // 3. Exit phase after 3.5s of showing up
         exitTimerRef.current = setTimeout(() => {
           setAnimationPhase('exiting')
-        }, 5400)
+        }, 3500)
 
-        // 4. Hidden phase at 6s
+        // 4. Fully vanished at 4.0s (within 3-5 seconds)
         hideTimerRef.current = setTimeout(() => {
-          setAnimationPhase(isPreview ? 'visible' : 'hidden')
+          setAnimationPhase(isPreviewRef.current ? 'visible' : 'hidden')
+          lastEventIdRef.current = ''
           hideTeamEliminated().catch(() => {})
-        }, 6000)
+          notifyRealtimeChange('broadcast_state', 'UPDATE', { show_elimination: false })
+        }, 4000)
       } else {
         // Just keep values synced if already visible
         setTeam(newTeam)
@@ -124,7 +147,7 @@ export default function EliminationOverlay() {
     } catch {
       // Quiet fail to keep stream uninterrupted
     }
-  }, [animationPhase, isPreview])
+  }, [])
 
   // Supabase Realtime subscription — triggers immediately on broadcast_state change
   useEffect(() => {

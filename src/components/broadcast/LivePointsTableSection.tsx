@@ -609,7 +609,7 @@ export default function LivePointsTableSection({ className = '' }: Props) {
             elimination_kills: firstTeam.kills,
           })
 
-          // If multiple teams were marked eliminated simultaneously, sequence them with 6.2s delay
+          // If multiple teams were marked eliminated simultaneously, sequence them with 4.5s delay
           for (let i = 1; i < newlyEliminatedTeams.length; i++) {
             const nextTeam = newlyEliminatedTeams[i]
             setTimeout(async () => {
@@ -619,7 +619,7 @@ export default function LivePointsTableSection({ className = '' }: Props) {
                 elimination_team_id: nextTeam.teamId,
                 elimination_kills: nextTeam.kills,
               })
-            }, i * 6200)
+            }, i * 4500)
           }
 
           const teamSummaries = newlyEliminatedTeams

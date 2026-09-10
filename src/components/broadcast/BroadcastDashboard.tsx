@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import { MatchInfo, OverlayKey, OverlayState } from '@/types/broadcast'
 import CurrentMatchSection from '@/components/broadcast/CurrentMatchSection'
 import BroadcastControlsSection from '@/components/broadcast/BroadcastControlsSection'
@@ -10,7 +10,7 @@ import OverlayStatusSection from '@/components/broadcast/OverlayStatusSection'
 import LivePointsTableSection from '@/components/broadcast/LivePointsTableSection'
 import MatchGraphicSection from '@/components/broadcast/MatchGraphicSection'
 
-import { getBroadcastState, toggleBroadcastOverlay } from '@/app/broadcast/actions/broadcast'
+import { getBroadcastState, toggleBroadcastOverlay, hideTeamEliminated } from '@/app/broadcast/actions/broadcast'
 import { notifyRealtimeChange, subscribeToRealtimeTables } from '@/lib/supabase/realtime'
 
 const DEFAULT_MATCH: MatchInfo = {
@@ -35,20 +35,38 @@ interface Props {
 export default function BroadcastDashboard({ embedded = false }: Props) {
   const [matchInfo, setMatchInfo] = useState<MatchInfo>(DEFAULT_MATCH)
   const [overlays, setOverlays] = useState<OverlayState>(DEFAULT_OVERLAYS)
+  const elimTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const scheduleEliminationReset = useCallback(() => {
+    if (elimTimerRef.current) clearTimeout(elimTimerRef.current)
+    elimTimerRef.current = setTimeout(() => {
+      setOverlays((prev) => ({ ...prev, eliminationGraphic: false }))
+      hideTeamEliminated().catch(() => {})
+      notifyRealtimeChange('broadcast_state', 'UPDATE', {
+        show_elimination: false,
+        key: 'eliminationGraphic',
+        enabled: false,
+      })
+    }, 4000)
+  }, [])
 
   const syncBroadcastState = useCallback(async () => {
     try {
       const res = await getBroadcastState()
       if (res.success && res.data) {
+        const isElimActive = !!res.data.show_elimination
         setOverlays({
           pointsTable: !!res.data.show_points,
           playerGraphic: !!res.data.show_player,
-          eliminationGraphic: !!res.data.show_elimination,
+          eliminationGraphic: isElimActive,
           matchGraphic: !!res.data.show_match,
         })
+        if (isElimActive) {
+          scheduleEliminationReset()
+        }
       }
     } catch {}
-  }, [])
+  }, [scheduleEliminationReset])
 
   useEffect(() => {
     syncBroadcastState()
@@ -57,7 +75,10 @@ export default function BroadcastDashboard({ embedded = false }: Props) {
       tables: ['broadcast_state'],
       onChange: () => syncBroadcastState(),
     })
-    return () => unsubscribe()
+    return () => {
+      unsubscribe()
+      if (elimTimerRef.current) clearTimeout(elimTimerRef.current)
+    }
   }, [syncBroadcastState])
 
   const toggleOverlay = useCallback((key: OverlayKey) => {
@@ -65,17 +86,27 @@ export default function BroadcastDashboard({ embedded = false }: Props) {
       const nextVal = !prev[key]
       toggleBroadcastOverlay(key, nextVal).catch(() => {})
       notifyRealtimeChange('broadcast_state', 'UPDATE', { key, enabled: nextVal })
+      if (key === 'eliminationGraphic') {
+        if (nextVal) {
+          scheduleEliminationReset()
+        } else if (elimTimerRef.current) {
+          clearTimeout(elimTimerRef.current)
+        }
+      }
       return { ...prev, [key]: nextVal }
     })
-  }, [])
+  }, [scheduleEliminationReset])
 
   const activateOverlay = useCallback((key: OverlayKey) => {
     setOverlays((prev) => {
       toggleBroadcastOverlay(key, true).catch(() => {})
       notifyRealtimeChange('broadcast_state', 'UPDATE', { key, enabled: true })
+      if (key === 'eliminationGraphic') {
+        scheduleEliminationReset()
+      }
       return { ...prev, [key]: true }
     })
-  }, [])
+  }, [scheduleEliminationReset])
 
   const handleMatchChange = useCallback((info: MatchInfo) => {
     setMatchInfo(info)
